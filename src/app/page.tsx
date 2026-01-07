@@ -16,10 +16,19 @@ export default function Home() {
   const ambientAudioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
-    // Steve Jobs: Ambient Paris soundscape
-    ambientAudioRef.current = new Audio('https://www.soundjay.com/ambient/restaurant-ambience-01.mp3');
-    ambientAudioRef.current.loop = true;
-    ambientAudioRef.current.volume = 0.05;
+    // Pierre's Ambient soundscape
+    // Using a more reliable source or silence if it fails
+    const audio = new Audio('https://www.soundjay.com/ambient/restaurant-ambience-01.mp3');
+    audio.loop = true;
+    audio.volume = 0.05;
+    ambientAudioRef.current = audio;
+
+    return () => {
+      if (ambientAudioRef.current) {
+        ambientAudioRef.current.pause();
+        ambientAudioRef.current = null;
+      }
+    };
   }, []);
 
   useEffect(() => {
@@ -29,7 +38,9 @@ export default function Home() {
   const toggleAmbience = () => {
     if (!ambientAudioRef.current) return;
     if (ambientAudioRef.current.paused) {
-      ambientAudioRef.current.play().catch(() => {});
+      ambientAudioRef.current.play().catch(err => {
+        console.warn("Ambient audio failed to play:", err);
+      });
     } else {
       ambientAudioRef.current.pause();
     }
@@ -39,7 +50,13 @@ export default function Home() {
     setErrorMessage(null);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
+      
+      // Determine supported MIME type
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm') 
+        ? 'audio/webm' 
+        : 'audio/mp4';
+
+      const mediaRecorder = new MediaRecorder(stream, { mimeType });
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
 
@@ -55,23 +72,31 @@ export default function Home() {
       if (ambientAudioRef.current?.paused) {
         ambientAudioRef.current.play().catch(() => {});
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Microphone error:", err);
-      setErrorMessage("Please allow microphone access");
+      setErrorMessage(err.message || "Please allow microphone access");
       setStatus('Idle');
     }
   };
 
   const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
       mediaRecorderRef.current.stop();
       setIsRecording(false);
       setStatus('Thinking...');
+      
+      // Stop all tracks to release the microphone
+      mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
     }
   };
 
   const sendAudio = async () => {
-    const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+    if (audioChunksRef.current.length === 0) {
+      setStatus('Idle');
+      return;
+    }
+
+    const audioBlob = new Blob(audioChunksRef.current, { type: mediaRecorderRef.current?.mimeType || 'audio/webm' });
     const formData = new FormData();
     formData.append('file', audioBlob, 'input.webm');
 
@@ -90,8 +115,8 @@ export default function Home() {
 
       setHistory(prev => [
         ...prev, 
-        { role: 'You', text: data.userText },
-        { role: 'Pierre', text: data.aiText }
+        { role: 'You', text: data.userText || "..." },
+        { role: 'Pierre', text: data.aiText || "..." }
       ]);
 
       if (data.respectScore !== undefined) setRespectScore(data.respectScore);
@@ -101,7 +126,7 @@ export default function Home() {
           const audio = new Audio(data.audio);
           await audio.play();
         } catch (playErr) {
-          console.warn("Audio playback failed:", playErr);
+          console.warn("Pierre's voice failed:", playErr);
         }
       }
       
@@ -139,6 +164,7 @@ export default function Home() {
           <button 
             onClick={toggleAmbience}
             className="p-3 rounded-full border border-zinc-800 hover:bg-zinc-900 transition-all active:scale-95"
+            title="Toggle Paris Ambience"
           >
             <Volume2 size={18} className="text-zinc-400" />
           </button>
@@ -161,7 +187,7 @@ export default function Home() {
         )}
 
         {errorMessage && (
-          <div className="flex items-center gap-3 bg-red-500/10 border border-red-500/20 p-4 rounded-xl text-red-500 text-sm">
+          <div className="flex items-center gap-3 bg-red-500/10 border border-red-500/20 p-4 rounded-xl text-red-500 text-sm animate-fade-in">
             <AlertCircle size={18} />
             <p>{errorMessage}</p>
           </div>

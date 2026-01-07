@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { query } from '../../../lib/db';
+import { query } from '../../../../lib/db';
 
 export async function POST(req: Request) {
   try {
@@ -23,7 +23,7 @@ export async function POST(req: Request) {
       } else {
         await query('INSERT INTO user_dossier (user_id, respect_score, session_count) VALUES ($1, $2, $3)', [userId, 50, 1]);
       }
-    } catch (dbErr) {
+    } catch (dbErr: any) {
       console.error('DB ERROR:', dbErr.message);
       // Fallback user state so we don't crash the whole app if DB is briefly down
       userState = { respect_score: 50, name: 'L’élève', session_count: 1 };
@@ -74,7 +74,7 @@ export async function POST(req: Request) {
 
         if (!gpuResponse.ok) throw new Error(`GPU Bridge status: ${gpuResponse.status}`);
         result = await gpuResponse.json();
-      } catch (gpuErr) {
+      } catch (gpuErr: any) {
         console.error('GPU Bridge Error:', gpuErr.message);
         result = {
           transcription: "[Inaudible]",
@@ -89,7 +89,7 @@ export async function POST(req: Request) {
     query(
       'UPDATE user_dossier SET respect_score = $1, last_interaction = NOW(), session_count = session_count + 1 WHERE user_id = $2',
       [Math.max(0, Math.min(100, (userState.respect_score || 50) + (result.respectChange || 0))), userId]
-    ).catch(e => console.error('Delayed DB Update failed:', e.message));
+    ).catch((e: any) => console.error('Delayed DB Update failed:', e.message));
 
     return NextResponse.json({
       userText: result.transcription,
@@ -98,7 +98,7 @@ export async function POST(req: Request) {
       respectScore: userState.respect_score + (result.respectChange || 0)
     });
 
-  } catch (error) {
+  } catch (error: any) {
     console.error('ROUTE FATAL:', error);
     return NextResponse.json({ 
       error: 'Pierre is busy', 
