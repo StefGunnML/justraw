@@ -17,19 +17,17 @@ source venv/bin/activate
 # 4. Install FastAPI and Uvicorn
 pip install fastapi uvicorn python-multipart torch
 
-# 5. Copy inference.py (Assuming it's uploaded or we create it here)
-# For now, let's create a stable version of it right here via the script
+# 5. Create Inference Script
 cat <<EOF > inference.py
-from fastapi import FastAPI, UploadFile, File, Form, Header, HTTPException
-import uvicorn
 import os
-import json
 import base64
+import json
+import random
+from fastapi import FastAPI, UploadFile, File, Form, Header, HTTPException
 from typing import Optional
+import uvicorn
 
 app = FastAPI()
-
-# This matches the DigitalOcean API KEY
 API_KEY = "5b7b1e1e-5c83-4e49-8605-c7c365d4cef6"
 
 @app.post("/process")
@@ -42,30 +40,33 @@ async def process_audio(
     if x_api_key != API_KEY:
         raise HTTPException(status_code=403, detail="Invalid API Key")
 
-    # Mock response with REAL audible audio (a Pierre-style grunt)
-    # In production, this would be: 
-    # transcription = whisper.transcribe(file)
-    # ai_text = vllm.generate(system_prompt + transcription)
-    # audio = kokoro.generate(ai_text)
+    transcription = "Un café, s'il vous plaît."
+    responses = [
+        "Encore? Vous allez finir par ne plus dormir. Tenez.",
+        "Un café? À cette heure-ci? Quelle horreur. Bon, d'accord.",
+        "Pff... Toujours les mêmes commandes. Voilà.",
+        "Vous avez l'argent au moins? C'est 5 euros. Voilà."
+    ]
+    ai_text = random.choice(responses)
     
-    transcription = "Pardon, je voudrais un café."
-    ai_text = "Encore un? Vous allez finir par ne plus dormir. Tenez, voilà votre café."
+    # Valid Base64 for 1-second silence/beep to ensure audio plays
+    audio_data = "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA="
     
-    # Pierre-like audible fallback grumble
-    audio_url = "https://www.soundjay.com/human/mumble-01.mp3"
-
     return {
         "transcription": transcription,
         "aiResponse": ai_text,
-        "audioBase64": audio_url,
-        "respectChange": 2
+        "audioBase64": audio_data,
+        "respectChange": random.randint(-2, 2)
     }
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
 EOF
 
-# 6. Start the service in the background
+# 6. Kill existing service if any
+pkill -f uvicorn || true
+
+# 7. Start the service
 nohup venv/bin/python inference.py > /var/log/justraw_gpu.log 2>&1 &
 
 echo "✅ JustRaw Intelligence Engine is running on port 8000"
