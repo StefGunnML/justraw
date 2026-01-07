@@ -121,12 +121,17 @@ export default function Home() {
 
       if (data.respectScore !== undefined) setRespectScore(data.respectScore);
 
-      if (data.audio) {
+      if (data.audio && data.audio.startsWith('data:audio')) {
         try {
           const audio = new Audio(data.audio);
-          await audio.play();
+          audio.oncanplaythrough = () => {
+            audio.play().catch(e => console.warn("Audio play blocked:", e));
+          };
+          audio.onerror = () => {
+            console.warn("Pierre's voice source is invalid");
+          };
         } catch (playErr) {
-          console.warn("Pierre's voice failed:", playErr);
+          console.warn("Pierre's voice setup failed:", playErr);
         }
       }
       
