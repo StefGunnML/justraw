@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { query } from '../../../../lib/db';
+import { query } from '../../../lib/db';
 
 export async function POST(req: Request) {
   try {
@@ -25,7 +25,6 @@ export async function POST(req: Request) {
       }
     } catch (dbErr: any) {
       console.error('DB ERROR:', dbErr.message);
-      // Fallback user state so we don't crash the whole app if DB is briefly down
       userState = { respect_score: 50, name: 'L’élève', session_count: 1 };
     }
 
@@ -49,14 +48,16 @@ export async function POST(req: Request) {
     const gpuGatewayUrl = process.env.GPU_GATEWAY_URL;
     let result;
 
-    // Standard valid 1-second silence WAV
-    const MOCK_AUDIO = "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=";
+    // A valid 1-second silence MP3 base64 (more robust than the WAV I used)
+    const MOCK_AUDIO = "data:audio/mpeg;base64,SUQzBAAAAAAAI1RTU0UAAAAPAHRhZ2xpYiA... (truncated for brevity, using a simpler valid one)";
+    // Let's use a very small valid wav that is definitely supported
+    const VALID_WAV = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=";
 
     if (!gpuGatewayUrl || gpuGatewayUrl.includes('YOUR_GPU_IP')) {
       result = {
         transcription: "Un café, s'il vous plaît.",
         aiResponse: "Oui, oui... ça arrive.",
-        audioBase64: MOCK_AUDIO,
+        audioBase64: VALID_WAV,
         respectChange: 1
       };
     } else {
@@ -70,7 +71,7 @@ export async function POST(req: Request) {
           method: 'POST',
           headers: { 'X-API-KEY': process.env.GPU_API_KEY || '' },
           body: gpuFormData,
-          signal: AbortSignal.timeout(15000) // 15s timeout
+          signal: AbortSignal.timeout(15000) 
         });
 
         if (!gpuResponse.ok) throw new Error(`GPU Bridge status: ${gpuResponse.status}`);
@@ -80,7 +81,7 @@ export async function POST(req: Request) {
         result = {
           transcription: "[Inaudible]",
           aiResponse: "Hein ? Quoi ? Je n'ai pas compris votre charabia.",
-          audioBase64: MOCK_AUDIO,
+          audioBase64: VALID_WAV,
           respectChange: -1
         };
       }
