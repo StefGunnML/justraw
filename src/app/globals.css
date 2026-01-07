@@ -1,4 +1,6 @@
-@import "tailwindcss";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
 :root {
   --foreground-rgb: 255, 255, 255;
@@ -14,26 +16,4 @@ body {
       rgb(var(--background-end-rgb))
     )
     rgb(var(--background-start-rgb));
-}
-
-@theme {
-  --font-sans: "Inter", system-ui, -apple-system, sans-serif;
-}
-
-@layer utilities {
-  .animate-spin-slow {
-    animation: spin 10s linear infinite;
-  }
-  .animate-ping-slow {
-    animation: ping 3s cubic-bezier(0, 0, 0.2, 1) infinite;
-  }
-}
-
-@keyframes vibrate {
-  0%, 100% { height: 20%; }
-  50% { height: 100%; }
-}
-
-.animate-vibrate {
-  animation: vibrate 0.5s ease-in-out infinite;
 }
