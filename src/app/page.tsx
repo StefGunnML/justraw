@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { Mic, Square, Loader2, Volume2, History, Coffee } from 'lucide-react';
+import { Mic, Square, Loader2, Volume2, History, Coffee, AlertCircle } from 'lucide-react';
 
 export default function Home() {
   const [isRecording, setIsRecording] = useState(false);
@@ -9,12 +9,14 @@ export default function Home() {
   const [history, setHistory] = useState<{role: string, text: string}[]>([]);
   const [respectScore, setRespectScore] = useState(50);
   const [isMadame, setIsMadame] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const ambientAudioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
-    // Steve Jobs: Ambient Paris soundscape (Start on first interaction)
+    // Steve Jobs: Ambient Paris soundscape
     ambientAudioRef.current = new Audio('https://www.soundjay.com/ambient/restaurant-ambience-01.mp3');
     ambientAudioRef.current.loop = true;
     ambientAudioRef.current.volume = 0.05;
@@ -25,14 +27,16 @@ export default function Home() {
   }, [respectScore]);
 
   const toggleAmbience = () => {
-    if (ambientAudioRef.current?.paused) {
-      ambientAudioRef.current.play();
+    if (!ambientAudioRef.current) return;
+    if (ambientAudioRef.current.paused) {
+      ambientAudioRef.current.play().catch(() => {});
     } else {
-      ambientAudioRef.current?.pause();
+      ambientAudioRef.current.pause();
     }
   };
 
   const startRecording = async () => {
+    setErrorMessage(null);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mediaRecorder = new MediaRecorder(stream);
@@ -48,10 +52,13 @@ export default function Home() {
       setIsRecording(true);
       setStatus('Listening...');
       
-      if (ambientAudioRef.current?.paused) ambientAudioRef.current.play();
+      if (ambientAudioRef.current?.paused) {
+        ambientAudioRef.current.play().catch(() => {});
+      }
     } catch (err) {
       console.error("Microphone error:", err);
-      setStatus('Microphone Error');
+      setErrorMessage("Please allow microphone access");
+      setStatus('Idle');
     }
   };
 
@@ -64,9 +71,9 @@ export default function Home() {
   };
 
   const sendAudio = async () => {
-    const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/mp3' });
+    const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
     const formData = new FormData();
-    formData.append('file', audioBlob, 'input.mp3');
+    formData.append('file', audioBlob, 'input.webm');
 
     try {
       const response = await fetch('/api/conversation', {
@@ -74,9 +81,12 @@ export default function Home() {
         body: formData,
       });
 
-      const data = await response.json();
+      if (!response.ok) {
+        const errData = await response.json();
+        throw new Error(errData.details || errData.error || 'Server error');
+      }
 
-      if (data.error) throw new Error(data.error);
+      const data = await response.json();
 
       setHistory(prev => [
         ...prev, 
@@ -84,15 +94,23 @@ export default function Home() {
         { role: 'Pierre', text: data.aiText }
       ]);
 
-      if (data.respectScore) setRespectScore(data.respectScore);
+      if (data.respectScore !== undefined) setRespectScore(data.respectScore);
 
-      const audio = new Audio(data.audio);
-      audio.play();
+      if (data.audio) {
+        try {
+          const audio = new Audio(data.audio);
+          await audio.play();
+        } catch (playErr) {
+          console.warn("Audio playback failed:", playErr);
+        }
+      }
+      
       setStatus('Idle');
 
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
-      setStatus('Error');
+      setErrorMessage(error.message);
+      setStatus('Idle');
     }
   };
 
@@ -128,9 +146,9 @@ export default function Home() {
       </div>
       
       {/* Conversation Area */}
-      <div className="flex-1 w-full max-w-2xl overflow-y-auto mb-8 space-y-8 scrollbar-hide">
-        {history.length === 0 && (
-          <div className="h-full flex flex-col items-center justify-center text-zinc-800 space-y-6">
+      <div className="flex-1 w-full max-w-2xl overflow-y-auto mb-8 space-y-8 scrollbar-hide p-4">
+        {history.length === 0 && !errorMessage && (
+          <div className="h-full flex flex-col items-center justify-center text-zinc-800 space-y-6 mt-20">
             <div className="w-24 h-24 rounded-full border border-zinc-900 flex items-center justify-center relative">
               <Coffee size={40} className="text-zinc-900" />
               <div className="absolute inset-0 rounded-full border-t border-zinc-700 animate-spin-slow" />
@@ -139,6 +157,13 @@ export default function Home() {
               <p className="text-xs font-black uppercase tracking-[0.3em] text-zinc-700 mb-2">Simulation Ready</p>
               <p className="text-zinc-500 italic font-medium">"Bonjour, qu'est-ce que vous voulez ?"</p>
             </div>
+          </div>
+        )}
+
+        {errorMessage && (
+          <div className="flex items-center gap-3 bg-red-500/10 border border-red-500/20 p-4 rounded-xl text-red-500 text-sm">
+            <AlertCircle size={18} />
+            <p>{errorMessage}</p>
           </div>
         )}
         
@@ -156,6 +181,7 @@ export default function Home() {
             </div>
           </div>
         ))}
+        <div id="anchor" className="h-1" />
       </div>
 
       {/* Controller */}
@@ -168,12 +194,12 @@ export default function Home() {
             </div>
           )}
           {status === 'Listening...' && (
-            <div className="flex items-end gap-1 h-4">
+            <div className="flex items-center gap-1 h-4">
               {[1,2,3,4,5].map(i => (
                 <div 
                   key={i} 
                   className="w-1 bg-red-500 rounded-full animate-vibrate" 
-                  style={{animationDelay: `${i*0.1}s`, height: `${Math.random()*100}%`}} 
+                  style={{animationDelay: `${i*0.1}s`, height: `${Math.random()*100 + 20}%`}} 
                 />
               ))}
             </div>
@@ -183,6 +209,7 @@ export default function Home() {
         <button
           onMouseDown={startRecording}
           onMouseUp={stopRecording}
+          onMouseLeave={isRecording ? stopRecording : undefined}
           onTouchStart={startRecording}
           onTouchEnd={stopRecording}
           className={`group relative w-28 h-28 rounded-full flex items-center justify-center transition-all duration-500 ${
