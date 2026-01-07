@@ -11,39 +11,46 @@ export async function POST(req: Request) {
     }
 
     // 1. Fetch User State (Dossier)
-    // For now, using a hardcoded user_id for testing
     const userId = '69556352-840f-45ff-9a8a-6b2a2ce074fa'; 
-    let userState = { respect_score: 50, name: 'L’élève' };
+    let userState = { respect_score: 50, name: 'L’élève', loyalty_level: 1 };
     
     try {
       const res = await query('SELECT * FROM user_dossier WHERE user_id = $1', [userId]);
       if (res.rows.length > 0) {
         userState = res.rows[0];
       } else {
-        // Initial insert
         await query('INSERT INTO user_dossier (user_id, respect_score) VALUES ($1, $2)', [userId, 50]);
       }
     } catch (dbErr) {
-      console.error('Database error, proceeding with defaults:', dbErr);
+      console.error('Database error:', dbErr);
     }
 
-    // 2. Call GPU Inference Gateway (Scaleway/DataCrunch)
+    // 2. Determine Context (Time of Day & Cultural Rules)
+    const now = new Date();
+    const hour = now.getHours();
+    let timeContext = "standard";
+    if (hour < 11) timeContext = "morning (croissants should be fresh, but don't ask for them too late)";
+    else if (hour >= 11 && hour < 14) timeContext = "lunch rush (Pierre is very busy and impatient)";
+    else if (hour >= 14 && hour < 18) timeContext = "afternoon (no milk in coffee, that's for breakfast)";
+    else timeContext = "evening (Pierre is tired and wants to go home)";
+
+    // 3. Call GPU Inference Gateway (Scaleway/DataCrunch)
     const gpuGatewayUrl = process.env.GPU_GATEWAY_URL;
     let result;
 
     if (!gpuGatewayUrl || gpuGatewayUrl.includes('YOUR_GPU_IP')) {
-      // MOCK MODE for initial testing
       console.log('Running in MOCK mode...');
       result = {
-        transcription: "Pardon, je... je cherche le café ?",
-        aiResponse: "Quoi ? Vous êtes perdu ? Le café est juste devant vous. Ouvrez les yeux !",
+        transcription: "Un café au lait, s'il vous plaît.",
+        aiResponse: hour > 11 ? "Pfff... Un café au lait ? À cette heure-ci ? C'est le matin pour ça. Enfin bref." : "Oui, oui... voilà votre café.",
         audioBase64: "data:audio/wav;base64,UklGRjIAAABXQVZFZm10IBIAAAABAAEAQB8AAEAfAAABAAgAAABmYWN0BAAAAAAAAABkYXRhAAAAAA==",
-        respectChange: -2
+        respectChange: hour > 11 ? -5 : 2
       };
     } else {
       const gpuFormData = new FormData();
       gpuFormData.append('file', audioFile);
       gpuFormData.append('respect_score', userState.respect_score.toString());
+      gpuFormData.append('time_context', timeContext);
       gpuFormData.append('user_context', JSON.stringify(userState));
 
       const gpuResponse = await fetch(`${gpuGatewayUrl}/process`, {
@@ -55,16 +62,13 @@ export async function POST(req: Request) {
       });
 
       if (!gpuResponse.ok) {
-        const errorText = await gpuResponse.text();
-        console.error('GPU Gateway error:', errorText);
         throw new Error('GPU processing failed');
       }
 
       result = await gpuResponse.json();
     }
 
-    // 3. Update User State (Respect Score Logic)
-    // The GPU service can suggest a score change based on the AI's "mood"
+    // 4. Update User State (Respect Score & Loyalty)
     const newRespectScore = Math.max(0, Math.min(100, userState.respect_score + (result.respectChange || 0)));
     
     await query(
