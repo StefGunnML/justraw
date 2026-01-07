@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { query } from '../../../../lib/db';
+import { query } from '../../../lib/db';
 
 export async function POST(req: Request) {
   try {
@@ -49,7 +49,8 @@ export async function POST(req: Request) {
     const gpuGatewayUrl = process.env.GPU_GATEWAY_URL;
     let result;
 
-    const MOCK_AUDIO = "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEAQB8AAEAfAAABAAgAAABmYWN0BAAAAAAAAABkYXRhAAAAAA==";
+    // Use a more standard "silent" wav base64 if possible, or just a small valid one
+    const MOCK_AUDIO = "data:audio/wav;base64,UklGRjIAAABXQVZFZm10IBIAAAABAAEAQB8AAEAfAAABAAgAAABmYWN0BAAAAAAAAABkYXRhAAAAAA==";
 
     if (!gpuGatewayUrl || gpuGatewayUrl.includes('YOUR_GPU_IP')) {
       result = {
