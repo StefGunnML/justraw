@@ -47,14 +47,14 @@ export async function POST(req: Request) {
     const gpuGatewayUrl = process.env.GPU_GATEWAY_URL;
     let result;
 
-    // Use a public URL for a "Pierre-like" grumble for the fallback/mock
-    const GRUMBLE_AUDIO = "https://www.soundjay.com/human/mumble-01.mp3";
+    // A valid 1-second silence WAV base64
+    const SILENCE_WAV = "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=";
 
     if (!gpuGatewayUrl || gpuGatewayUrl.includes('YOUR_GPU_IP')) {
       result = {
         transcription: "Un café, s'il vous plaît.",
         aiResponse: "Oui, oui... ça arrive.",
-        audioBase64: GRUMBLE_AUDIO,
+        audioBase64: SILENCE_WAV,
         respectChange: 1
       };
     } else {
@@ -78,7 +78,7 @@ export async function POST(req: Request) {
         result = {
           transcription: "[Inaudible]",
           aiResponse: "Hein ? Quoi ? Je n'ai pas compris votre charabia.",
-          audioBase64: GRUMBLE_AUDIO,
+          audioBase64: SILENCE_WAV,
           respectChange: -1
         };
       }

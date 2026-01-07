@@ -16,9 +16,8 @@ export default function Home() {
   const ambientAudioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
-    // Pierre's Ambient soundscape
-    // Using a more reliable source or silence if it fails
-    const audio = new Audio('https://www.soundjay.com/ambient/restaurant-ambience-01.mp3');
+    // Pierre's Ambient soundscape - Disabled if URL is dead
+    const audio = new Audio('https://actions.google.com/sounds/v1/ambiences/coffee_shop.ogg');
     audio.loop = true;
     audio.volume = 0.05;
     ambientAudioRef.current = audio;
