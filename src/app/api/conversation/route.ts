@@ -7,6 +7,7 @@ export async function POST(req: Request) {
     const audioFile = formData.get('file') as File;
 
     if (!audioFile) {
+      console.error('No audio file in request');
       return NextResponse.json({ error: 'No audio file provided' }, { status: 400 });
     }
 
@@ -15,14 +16,19 @@ export async function POST(req: Request) {
     let userState = { respect_score: 50, name: 'L’élève', session_count: 1 };
     
     try {
+      console.log('Fetching user state for:', userId);
       const res = await query('SELECT * FROM user_dossier WHERE user_id = $1', [userId]);
       if (res.rows.length > 0) {
         userState = res.rows[0];
+        console.log('User state found:', userState);
       } else {
+        console.log('User not found, creating new entry');
         await query('INSERT INTO user_dossier (user_id, respect_score, session_count) VALUES ($1, $2, $3)', [userId, 50, 1]);
       }
     } catch (dbErr) {
-      console.error('Database error:', dbErr);
+      console.error('CRITICAL: Database connection failed:', dbErr);
+      // We can't proceed without DB for the "Killer" logic
+      throw dbErr; 
     }
 
     // 2. Determine Context (Time of Day in Paris & Cultural Rules)
@@ -62,7 +68,7 @@ export async function POST(req: Request) {
     let result;
 
     if (!gpuGatewayUrl || gpuGatewayUrl.includes('YOUR_GPU_IP')) {
-      console.log('Running in MOCK mode...');
+      console.log('Running in MOCK mode (No GPU URL found)...');
       result = {
         transcription: "Un café au lait, s'il vous plaît.",
         aiResponse: hour > 15 ? "Pfff... Un café au lait à cette heure ? On n'est plus au petit-déjeuner, Madame. Enfin bref." : "Oui, oui... voilà votre café.",
@@ -70,34 +76,53 @@ export async function POST(req: Request) {
         respectChange: hour > 15 ? -5 : 2
       };
     } else {
+      console.log('Calling GPU Gateway:', gpuGatewayUrl);
       const gpuFormData = new FormData();
       gpuFormData.append('file', audioFile);
       gpuFormData.append('system_prompt', systemPrompt);
       gpuFormData.append('respect_score', userState.respect_score.toString());
       gpuFormData.append('user_context', JSON.stringify(userState));
 
-      const gpuResponse = await fetch(`${gpuGatewayUrl}/process`, {
-        method: 'POST',
-        headers: {
-          'X-API-KEY': process.env.GPU_API_KEY || '',
-        },
-        body: gpuFormData,
-      });
+      try {
+        const gpuResponse = await fetch(`${gpuGatewayUrl}/process`, {
+          method: 'POST',
+          headers: {
+            'X-API-KEY': process.env.GPU_API_KEY || '',
+          },
+          body: gpuFormData,
+        });
 
-      if (!gpuResponse.ok) {
-        throw new Error('GPU processing failed');
+        if (!gpuResponse.ok) {
+          const errText = await gpuResponse.text();
+          console.error('GPU Gateway returned error:', errText);
+          throw new Error('GPU Gateway failed');
+        }
+
+        result = await gpuResponse.json();
+        console.log('GPU result received');
+      } catch (gpuErr) {
+        console.error('Failed to connect to GPU Gateway. Falling back to MOCK response.', gpuErr);
+        result = {
+          transcription: "Désolé, je ne vous ai pas bien entendu.",
+          aiResponse: "Quoi ? Parlez plus fort, je n'ai pas toute la journée.",
+          audioBase64: "data:audio/wav;base64,UklGRjIAAABXQVZFZm10IBIAAAABAAEAQB8AAEAfAAABAAgAAABmYWN0BAAAAAAAAABkYXRhAAAAAA==",
+          respectChange: -1
+        };
       }
-
-      result = await gpuResponse.json();
     }
 
     // 4. Update User State (Respect Score & session count)
     const newRespectScore = Math.max(0, Math.min(100, (userState.respect_score || 50) + (result.respectChange || 0)));
     
-    await query(
-      'UPDATE user_dossier SET respect_score = $1, last_interaction = NOW(), session_count = session_count + 1 WHERE user_id = $2',
-      [newRespectScore, userId]
-    );
+    try {
+      await query(
+        'UPDATE user_dossier SET respect_score = $1, last_interaction = NOW(), session_count = session_count + 1 WHERE user_id = $2',
+        [newRespectScore, userId]
+      );
+      console.log('User state updated in DB');
+    } catch (updateErr) {
+      console.error('Failed to update DB, continuing anyway:', updateErr);
+    }
 
     return NextResponse.json({
       userText: result.transcription,
@@ -107,7 +132,7 @@ export async function POST(req: Request) {
     });
 
   } catch (error) {
-    console.error('Route error:', error);
-    return NextResponse.json({ error: 'Something went wrong' }, { status: 500 });
+    console.error('FATAL ROUTE ERROR:', error);
+    return NextResponse.json({ error: 'Something went wrong', details: error.message }, { status: 500 });
   }
 }
