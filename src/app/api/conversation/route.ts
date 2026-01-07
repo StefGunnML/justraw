@@ -16,7 +16,6 @@ export async function POST(req: Request) {
     let userState = { respect_score: 50, name: 'L’élève', session_count: 1 };
     
     try {
-      console.log('Connecting to DB...');
       const res = await query('SELECT * FROM user_dossier WHERE user_id = $1', [userId]);
       if (res.rows.length > 0) {
         userState = res.rows[0];
@@ -48,16 +47,14 @@ export async function POST(req: Request) {
     const gpuGatewayUrl = process.env.GPU_GATEWAY_URL;
     let result;
 
-    // A valid 1-second silence MP3 base64 (more robust than the WAV I used)
-    const MOCK_AUDIO = "data:audio/mpeg;base64,SUQzBAAAAAAAI1RTU0UAAAAPAHRhZ2xpYiA... (truncated for brevity, using a simpler valid one)";
-    // Let's use a very small valid wav that is definitely supported
-    const VALID_WAV = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=";
+    // Use a public URL for a "Pierre-like" grumble for the fallback/mock
+    const GRUMBLE_AUDIO = "https://www.soundjay.com/human/mumble-01.mp3";
 
     if (!gpuGatewayUrl || gpuGatewayUrl.includes('YOUR_GPU_IP')) {
       result = {
         transcription: "Un café, s'il vous plaît.",
         aiResponse: "Oui, oui... ça arrive.",
-        audioBase64: VALID_WAV,
+        audioBase64: GRUMBLE_AUDIO,
         respectChange: 1
       };
     } else {
@@ -81,7 +78,7 @@ export async function POST(req: Request) {
         result = {
           transcription: "[Inaudible]",
           aiResponse: "Hein ? Quoi ? Je n'ai pas compris votre charabia.",
-          audioBase64: VALID_WAV,
+          audioBase64: GRUMBLE_AUDIO,
           respectChange: -1
         };
       }
