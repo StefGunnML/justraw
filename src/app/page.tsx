@@ -8,9 +8,11 @@ export default function Home() {
   const [status, setStatus] = useState('Idle');
   const [history, setHistory] = useState<{role: string, text: string}[]>([]);
   const [respectScore, setRespectScore] = useState(50);
+  const [isPierreThinking, setIsPierreThinking] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const ambientAudioRef = useRef<HTMLAudioElement | null>(null);
+  const fillerAudios = ['/audio/sigh.mp3', '/audio/bof.mp3', '/audio/spoon.mp3'];
 
   useEffect(() => {
     // Steve Jobs: Ambient Paris soundscape
@@ -65,6 +67,9 @@ export default function Home() {
     formData.append('file', audioBlob, 'input.mp3');
 
     try {
+      setStatus('Pierre is judging...');
+      setIsPierreThinking(true);
+      
       const response = await fetch('/api/conversation', {
         method: 'POST',
         body: formData,
@@ -73,6 +78,16 @@ export default function Home() {
       const data = await response.json();
 
       if (data.error) throw new Error(data.error);
+
+      // Play a random filler audio to mask latency
+      const randomFiller = fillerAudios[Math.floor(Math.random() * fillerAudios.length)];
+      const filler = new Audio(randomFiller);
+      filler.volume = 0.3;
+      try {
+        await filler.play();
+      } catch (e) {
+        console.log("Filler audio not found, skipping...");
+      }
 
       setHistory(prev => [
         ...prev, 
@@ -83,12 +98,17 @@ export default function Home() {
       if (data.respectScore) setRespectScore(data.respectScore);
 
       const audio = new Audio(data.audio);
-      audio.play();
-      setStatus('Idle');
+      // Wait a tiny bit for the filler to breathe
+      setTimeout(() => {
+        audio.play();
+        setIsPierreThinking(false);
+        setStatus('Idle');
+      }, 800);
 
     } catch (error) {
       console.error(error);
       setStatus('Error');
+      setIsPierreThinking(false);
     }
   };
 
