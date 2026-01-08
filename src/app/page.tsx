@@ -38,7 +38,7 @@ export default function Home() {
     // Pierre's Ambient soundscape - Disabled if URL is dead
     const audio = new Audio('https://actions.google.com/sounds/v1/ambiences/coffee_shop.ogg');
     audio.loop = true;
-    audio.volume = 0.05;
+    audio.volume = 0.25;
     ambientAudioRef.current = audio;
 
     // Load current session history on mount
@@ -125,6 +125,9 @@ export default function Home() {
   };
 
   const startRecording = async () => {
+    // Prevent multiple recordings
+    if (isRecording || isProcessingRef.current) return;
+    
     setErrorMessage(null);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
