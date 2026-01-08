@@ -53,7 +53,7 @@ export async function POST(req: Request) {
         method: 'POST',
         headers: { 'X-API-KEY': process.env.GPU_API_KEY || '' },
         body: gpuFormData,
-        signal: AbortSignal.timeout(10000) 
+        signal: AbortSignal.timeout(60000) 
       });
 
       const responseTime = Date.now() - startTime;

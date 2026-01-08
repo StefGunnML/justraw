@@ -32,6 +32,7 @@ export default function Home() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const ambientAudioRef = useRef<HTMLAudioElement | null>(null);
+  const isProcessingRef = useRef(false);
 
   useEffect(() => {
     // Pierre's Ambient soundscape - Disabled if URL is dead
@@ -168,12 +169,18 @@ export default function Home() {
   };
 
   const sendAudio = async () => {
-    if (audioChunksRef.current.length === 0) {
+    // Prevent duplicate submissions
+    if (isProcessingRef.current || audioChunksRef.current.length === 0) {
       setStatus('Idle');
       return;
     }
 
+    isProcessingRef.current = true;
     const audioBlob = new Blob(audioChunksRef.current, { type: mediaRecorderRef.current?.mimeType || 'audio/webm' });
+    
+    // Clear chunks immediately to prevent duplicates
+    audioChunksRef.current = [];
+    
     const formData = new FormData();
     formData.append('file', audioBlob, 'input.webm');
     formData.append('sessionId', sessionId);
@@ -214,11 +221,13 @@ export default function Home() {
       }
       
       setStatus('Idle');
+      isProcessingRef.current = false;
 
     } catch (error: any) {
       console.error(error);
       setErrorMessage(error.message);
       setStatus('Idle');
+      isProcessingRef.current = false;
     }
   };
 
