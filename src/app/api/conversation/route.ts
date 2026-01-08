@@ -7,6 +7,10 @@ export async function POST(req: Request) {
     const audioFile = formData.get('file') as File;
     const sessionId = formData.get('sessionId') as string;
 
+    // #region agent log
+    fetch('http://127.0.0.1:7244/ingest/7bf95331-fd0d-4a43-88da-dd7d07d79f6f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'route.ts:4',message:'POST request received',data:{hasAudioFile:!!audioFile,hasSessionId:!!sessionId,audioFileSize:audioFile?.size,audioFileType:audioFile?.type},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'ALL'})}).catch(()=>{});
+    // #endregion
+
     if (!audioFile) {
       return NextResponse.json({ error: 'No audio file provided' }, { status: 400 });
     }
@@ -35,11 +39,16 @@ export async function POST(req: Request) {
     // Audible "Beep" for diagnostic
     const TEST_BEEP = "data:audio/wav;base64,UklGRl9vT1RKdmVyc2lvbgEAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAABvT1RK";
 
+    // #region agent log
+    fetch('http://127.0.0.1:7244/ingest/7bf95331-fd0d-4a43-88da-dd7d07d79f6f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'route.ts:38',message:'GPU request start',data:{url:gpuGatewayUrl,hasApiKey:!!process.env.GPU_API_KEY,audioFileSize:audioFile.size,audioFileType:audioFile.type,respectScore:userState.respect_score},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A,B,C,D'})}).catch(()=>{});
+    // #endregion
+
     try {
       const gpuFormData = new FormData();
       gpuFormData.append('file', audioFile);
       gpuFormData.append('respect_score', userState.respect_score.toString());
 
+      const startTime = Date.now();
       const gpuResponse = await fetch(`${gpuGatewayUrl}/process`, {
         method: 'POST',
         headers: { 'X-API-KEY': process.env.GPU_API_KEY || '' },
@@ -47,9 +56,23 @@ export async function POST(req: Request) {
         signal: AbortSignal.timeout(10000) 
       });
 
+      const responseTime = Date.now() - startTime;
+      
+      // #region agent log
+      fetch('http://127.0.0.1:7244/ingest/7bf95331-fd0d-4a43-88da-dd7d07d79f6f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'route.ts:51',message:'GPU response received',data:{status:gpuResponse.status,statusText:gpuResponse.statusText,ok:gpuResponse.ok,responseTimeMs:responseTime},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A,B,D'})}).catch(()=>{});
+      // #endregion
+
       if (!gpuResponse.ok) throw new Error("GPU_DOWN");
       result = await gpuResponse.json();
+      
+      // #region agent log
+      fetch('http://127.0.0.1:7244/ingest/7bf95331-fd0d-4a43-88da-dd7d07d79f6f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'route.ts:58',message:'GPU result parsed',data:{hasTranscription:!!result.transcription,hasAiResponse:!!result.aiResponse,transcriptionLength:result.transcription?.length,respectChange:result.respectChange},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'E'})}).catch(()=>{});
+      // #endregion
     } catch (err) {
+      // #region agent log
+      fetch('http://127.0.0.1:7244/ingest/7bf95331-fd0d-4a43-88da-dd7d07d79f6f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'route.ts:65',message:'GPU request failed',data:{errorName:err instanceof Error ? err.name : 'Unknown',errorMessage:err instanceof Error ? err.message : String(err),errorType:err?.constructor?.name},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A,B,C,D'})}).catch(()=>{});
+      // #endregion
+      
       result = {
         transcription: "[Espace de silence]",
         aiResponse: "Pff... je n'entends rien. Votre micro est en panne ou quoi ?",
