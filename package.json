@@ -6,7 +6,10 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "db:init": "node scripts/init-db.js",
+    "db:migrate": "node scripts/init-db.js && node scripts/create-conversations-direct.js",
+    "db:test": "node scripts/test-db-connection.js"
   },
   "dependencies": {
     "dotenv": "^16.4.7",

@@ -1,14 +1,33 @@
 const { Pool } = require('pg');
 require('dotenv').config({ path: '.env.local' });
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: {
-    rejectUnauthorized: false
+// Try with SSL first, fall back to no SSL if it fails
+let pool;
+
+async function createPool() {
+  try {
+    pool = new Pool({
+      connectionString: process.env.DATABASE_URL,
+      ssl: {
+        rejectUnauthorized: false
+      }
+    });
+    // Test the connection
+    const client = await pool.connect();
+    client.release();
+    return pool;
+  } catch (err) {
+    // If SSL fails, try without SSL
+    console.log('SSL connection failed, trying without SSL...');
+    pool = new Pool({
+      connectionString: process.env.DATABASE_URL
+    });
+    return pool;
   }
-});
+}
 
 async function initDb() {
+  await createPool();
   const client = await pool.connect();
   try {
     console.log('Updating user_dossier table...');

@@ -1,15 +1,33 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { Mic, Square, Loader2, Volume2, History, Coffee, AlertCircle } from 'lucide-react';
+import { Mic, Square, Loader2, Volume2, History, Coffee, AlertCircle, Clock, MessageSquare } from 'lucide-react';
+
+type ConversationMessage = {
+  role: string;
+  text: string;
+};
+
+type PastSession = {
+  session_id: string;
+  user_message: string;
+  ai_response: string;
+  respect_score_after: number;
+  created_at: string;
+  message_count: number;
+};
 
 export default function Home() {
   const [isRecording, setIsRecording] = useState(false);
   const [status, setStatus] = useState('Idle');
-  const [history, setHistory] = useState<{role: string, text: string}[]>([]);
+  const [history, setHistory] = useState<ConversationMessage[]>([]);
   const [respectScore, setRespectScore] = useState(50);
   const [isMadame, setIsMadame] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [sessionId] = useState(() => crypto.randomUUID());
+  const [showHistory, setShowHistory] = useState(false);
+  const [pastSessions, setPastSessions] = useState<PastSession[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
   
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -22,6 +40,9 @@ export default function Home() {
     audio.volume = 0.05;
     ambientAudioRef.current = audio;
 
+    // Load current session history on mount
+    loadSessionHistory();
+
     return () => {
       if (ambientAudioRef.current) {
         ambientAudioRef.current.pause();
@@ -29,6 +50,63 @@ export default function Home() {
       }
     };
   }, []);
+
+  const loadSessionHistory = async () => {
+    try {
+      const response = await fetch(`/api/conversation?sessionId=${sessionId}`);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.conversations && data.conversations.length > 0) {
+          const loadedHistory = data.conversations.flatMap((conv: any) => [
+            { role: 'You', text: conv.user_message },
+            { role: 'Pierre', text: conv.ai_response }
+          ]);
+          setHistory(loadedHistory);
+          // Set the respect score from the last message
+          const lastConv = data.conversations[data.conversations.length - 1];
+          setRespectScore(lastConv.respect_score_after);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load session history:', err);
+    }
+  };
+
+  const loadPastSessions = async () => {
+    setLoadingHistory(true);
+    try {
+      const response = await fetch('/api/conversation');
+      if (response.ok) {
+        const data = await response.json();
+        setPastSessions(data.sessions || []);
+      }
+    } catch (err) {
+      console.error('Failed to load past sessions:', err);
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
+
+  const loadSession = async (sessionIdToLoad: string) => {
+    try {
+      const response = await fetch(`/api/conversation?sessionId=${sessionIdToLoad}`);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.conversations && data.conversations.length > 0) {
+          const loadedHistory = data.conversations.flatMap((conv: any) => [
+            { role: 'You', text: conv.user_message },
+            { role: 'Pierre', text: conv.ai_response }
+          ]);
+          setHistory(loadedHistory);
+          const lastConv = data.conversations[data.conversations.length - 1];
+          setRespectScore(lastConv.respect_score_after);
+          setShowHistory(false);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load session:', err);
+    }
+  };
 
   useEffect(() => {
     if (respectScore > 80) setIsMadame(true);
@@ -98,6 +176,7 @@ export default function Home() {
     const audioBlob = new Blob(audioChunksRef.current, { type: mediaRecorderRef.current?.mimeType || 'audio/webm' });
     const formData = new FormData();
     formData.append('file', audioBlob, 'input.webm');
+    formData.append('sessionId', sessionId);
 
     try {
       const response = await fetch('/api/conversation', {
@@ -172,8 +251,89 @@ export default function Home() {
           >
             <Volume2 size={18} className="text-zinc-400" />
           </button>
+          <button 
+            onClick={() => {
+              setShowHistory(!showHistory);
+              if (!showHistory) loadPastSessions();
+            }}
+            className="p-3 rounded-full border border-zinc-800 hover:bg-zinc-900 transition-all active:scale-95"
+            title="View Conversation History"
+          >
+            <History size={18} className="text-zinc-400" />
+          </button>
         </div>
       </div>
+
+      {/* History Sidebar */}
+      {showHistory && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm animate-fade-in">
+          <div className="w-full max-w-2xl h-[80vh] bg-zinc-950 border border-zinc-800 rounded-2xl flex flex-col overflow-hidden">
+            {/* Header */}
+            <div className="p-6 border-b border-zinc-800 flex justify-between items-center">
+              <div>
+                <h2 className="text-xl font-black tracking-wide uppercase">Conversation History</h2>
+                <p className="text-xs text-zinc-500 mt-1">Past sessions with Pierre</p>
+              </div>
+              <button 
+                onClick={() => setShowHistory(false)}
+                className="p-2 hover:bg-zinc-900 rounded-lg transition-all"
+              >
+                <span className="text-zinc-400 text-2xl">&times;</span>
+              </button>
+            </div>
+
+            {/* Sessions List */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-4">
+              {loadingHistory ? (
+                <div className="flex items-center justify-center h-full">
+                  <Loader2 className="animate-spin text-zinc-500" size={32} />
+                </div>
+              ) : pastSessions.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-full text-zinc-600">
+                  <MessageSquare size={48} className="mb-4 opacity-50" />
+                  <p className="text-sm">No past conversations yet</p>
+                </div>
+              ) : (
+                pastSessions.map((session) => (
+                  <div 
+                    key={session.session_id}
+                    onClick={() => loadSession(session.session_id)}
+                    className="p-4 bg-zinc-900/50 border border-zinc-800 rounded-xl hover:bg-zinc-900 hover:border-zinc-700 cursor-pointer transition-all group"
+                  >
+                    <div className="flex justify-between items-start mb-2">
+                      <div className="flex items-center gap-2">
+                        <Clock size={14} className="text-zinc-500" />
+                        <span className="text-xs text-zinc-500">
+                          {new Date(session.created_at).toLocaleString('fr-FR', {
+                            day: 'numeric',
+                            month: 'short',
+                            hour: '2-digit',
+                            minute: '2-digit'
+                          })}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className="text-xs text-zinc-600">
+                          {session.message_count} {session.message_count === 1 ? 'message' : 'messages'}
+                        </span>
+                        <span className={`text-xs font-bold ${session.respect_score_after < 40 ? 'text-red-500' : 'text-emerald-500'}`}>
+                          {session.respect_score_after}%
+                        </span>
+                      </div>
+                    </div>
+                    <p className="text-sm text-zinc-400 truncate mb-1">
+                      <span className="text-zinc-600">You:</span> {session.user_message}
+                    </p>
+                    <p className="text-sm text-zinc-300 truncate">
+                      <span className="text-zinc-600">Pierre:</span> {session.ai_response}
+                    </p>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
       
       {/* Conversation Area */}
       <div className="flex-1 w-full max-w-2xl overflow-y-auto mb-8 space-y-8 scrollbar-hide p-4">
