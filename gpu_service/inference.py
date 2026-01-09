@@ -4,33 +4,43 @@ import os
 import json
 import base64
 import torch
+import httpx
+import re
 from typing import Optional
 from faster_whisper import WhisperModel
-from vllm import LLM, SamplingParams
 import asyncio
+from kokoro import KPipeline
 
 app = FastAPI()
 
 # Security
 API_KEY = os.getenv("API_KEY", "5b7b1e1e-5c83-4e49-8605-c7c365d4cef6")
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "sk-88968cda0bc54682a9d9156a432b1037")
 
-# 1. Load Faster-Whisper (STT)
-# Using 'medium' for a good balance of speed/accuracy
-print("Loading Whisper Model...")
-whisper_model = WhisperModel("medium", device="cuda", compute_type="float16")
+# 1. Load Faster-Whisper (STT) on CPU to save GPU memory
+print("Loading Whisper Model on CPU...")
+whisper_model = WhisperModel("medium", device="cpu", compute_type="int8")
 
-# 2. Load vLLM (DeepSeek 33B)
-# Note: We use quantization if needed, but H100 has 80GB. 
-# DeepSeek 33B FP16 is ~66GB, fits perfectly.
-print("Loading DeepSeek 33B via vLLM...")
-# Optimization: use --model-type chat if possible, but vLLM usually detects it
-llm = LLM(
-    model="deepseek-ai/deepseek-llm-33b-chat", 
-    trust_remote_code=True, 
-    gpu_memory_utilization=0.9,
-    max_model_len=4096
-)
-sampling_params = SamplingParams(temperature=0.7, top_p=0.95, max_tokens=200)
+# 2. DeepSeek API (no local model needed)
+DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
+
+# 3. Load Kokoro TTS
+print("Loading Kokoro TTS...")
+pipeline = KPipeline(lang_code='fr', voice='ff_siwis')
+
+def clean_text_for_tts(text):
+    """Remove markdown and stage directions from text before TTS"""
+    # Remove text between asterisks (stage directions like *taps notepad*)
+    text = re.sub(r'\*[^*]+\*', '', text)
+    # Remove markdown bold/italic
+    text = re.sub(r'[*_]+', '', text)
+    # Remove markdown headers
+    text = re.sub(r'#+\s*', '', text)
+    # Remove links [text](url)
+    text = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', text)
+    # Clean up extra spaces
+    text = re.sub(r'\s+', ' ', text)
+    return text.strip()
 
 @app.post("/process")
 async def process_audio(
@@ -56,16 +66,42 @@ async def process_audio(
         if not user_text.strip():
             user_text = "[Silence]"
 
-        # 3. Generate AI Response (LLM)
-        full_prompt = f"{system_prompt}\n\nUser: {user_text}\nPierre:"
-        outputs = llm.generate([full_prompt], sampling_params)
-        ai_text = outputs[0].outputs[0].text.strip()
-        print(f"AI Response: {ai_text}")
+        # 3. Generate AI Response via DeepSeek API
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                DEEPSEEK_API_URL,
+                headers={
+                    "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": "deepseek-chat",
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_text}
+                    ],
+                    "temperature": 0.7,
+                    "max_tokens": 200
+                }
+            )
+            response.raise_for_status()
+            ai_text = response.json()["choices"][0]["message"]["content"].strip()
+            print(f"AI Response: {ai_text}")
 
-        # 4. Mock TTS (Wait for Kokoro integration)
-        # For now, we return a beep or silent WAV as a placeholder
-        # In the next step we will add the real Kokoro pipeline
-        AUDIBLE_BEEP = "data:audio/wav;base64,UklGRl9vT1RKdmVyc2lvbgEAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAABvT1RK"
+        # 4. Clean text for TTS (remove stage directions and markdown)
+        clean_ai_text = clean_text_for_tts(ai_text)
+        print(f"Cleaned for TTS: {clean_ai_text}")
+
+        # 5. Generate speech with Kokoro TTS
+        audio_data, sample_rate = pipeline(clean_ai_text, voice='ff_siwis', speed=0.9, split_pattern=r'\n+')
+        
+        # Convert to WAV and base64
+        import io
+        import scipy.io.wavfile as wavfile
+        wav_buffer = io.BytesIO()
+        wavfile.write(wav_buffer, sample_rate, audio_data)
+        wav_buffer.seek(0)
+        audio_base64 = base64.b64encode(wav_buffer.read()).decode('utf-8')
 
         # Simple respect change logic based on keywords
         respect_change = 0
@@ -77,7 +113,7 @@ async def process_audio(
         return {
             "transcription": user_text,
             "aiResponse": ai_text,
-            "audioBase64": AUDIBLE_BEEP, 
+            "audioBase64": f"data:audio/wav;base64,{audio_base64}",
             "respectChange": respect_change
         }
 

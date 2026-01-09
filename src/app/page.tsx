@@ -130,18 +130,29 @@ export default function Home() {
     
     setErrorMessage(null);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      console.log('[Recording] Requesting microphone access...');
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        } 
+      });
+      
+      console.log('[Recording] Microphone access granted');
       
       // Determine supported MIME type
       const mimeType = MediaRecorder.isTypeSupported('audio/webm') 
         ? 'audio/webm' 
         : 'audio/mp4';
 
+      console.log(`[Recording] Using MIME type: ${mimeType}`);
       const mediaRecorder = new MediaRecorder(stream, { mimeType });
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
 
       mediaRecorder.ondataavailable = (event) => {
+        console.log(`[Recording] Data available: ${event.data.size} bytes`);
         if (event.data.size > 0) audioChunksRef.current.push(event.data);
       };
 
@@ -149,13 +160,14 @@ export default function Home() {
       mediaRecorder.start();
       setIsRecording(true);
       setStatus('Listening...');
+      console.log('[Recording] Started recording');
       
       if (ambientAudioRef.current?.paused) {
         ambientAudioRef.current.play().catch(() => {});
       }
     } catch (err: any) {
-      console.error("Microphone error:", err);
-      setErrorMessage(err.message || "Please allow microphone access");
+      console.error("[Recording] Microphone error:", err);
+      setErrorMessage(`Microphone error: ${err.message || 'Please allow microphone access in browser settings'}`);
       setStatus('Idle');
     }
   };
