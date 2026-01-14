@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { query } from '../../../lib/db';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
 export async function POST(req: Request) {
   try {
@@ -33,7 +34,6 @@ export async function POST(req: Request) {
     }
 
     // 2. Gemini AI Processing
-    const { GoogleGenerativeAI } = require('@google/generative-ai');
     const geminiApiKey = process.env.GEMINI_API_KEY;
     let result;
 
