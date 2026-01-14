@@ -1,37 +1,46 @@
 import { Pool } from 'pg';
 
-// Always disable SSL certificate verification for self-signed certificates
-// This is necessary for DigitalOcean Managed Databases and similar services
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+// Skip database setup during build time
+const isBuilding = !process.env.DATABASE_URL && process.env.NODE_ENV === 'production';
 
-// Determine if we should use SSL based on DATABASE_URL or environment
-const shouldUseSSL = process.env.DATABASE_URL?.includes('sslmode=require') || 
-                     process.env.DATABASE_URL?.includes('digitalocean') ||
-                     process.env.NODE_ENV === 'production';
+let pool: Pool | null = null;
 
-const poolConfig: any = {
-  connectionString: process.env.DATABASE_URL
-};
+if (!isBuilding && process.env.DATABASE_URL) {
+  // Always disable SSL certificate verification for self-signed certificates
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
-// Add SSL configuration if needed
-if (shouldUseSSL) {
-  poolConfig.ssl = {
-    rejectUnauthorized: false,
-    require: false
+  const shouldUseSSL = process.env.DATABASE_URL.includes('sslmode=require') || 
+                       process.env.DATABASE_URL.includes('digitalocean') ||
+                       process.env.NODE_ENV === 'production';
+
+  const poolConfig: any = {
+    connectionString: process.env.DATABASE_URL
   };
+
+  if (shouldUseSSL) {
+    poolConfig.ssl = {
+      rejectUnauthorized: false,
+      require: false
+    };
+  }
+
+  pool = new Pool(poolConfig);
+
+  try {
+    const dbUrl = new URL(process.env.DATABASE_URL);
+    console.log('[DB] Connected to:', dbUrl.hostname, 'SSL:', shouldUseSSL ? 'enabled' : 'disabled');
+  } catch {
+    console.log('[DB] Connected');
+  }
+
+  pool.on('error', (err: Error) => {
+    console.error('Unexpected database error:', err);
+  });
 }
 
-const pool = new Pool(poolConfig);
-
-// Log database connection info (masked)
-if (process.env.DATABASE_URL) {
-  const dbUrl = new URL(process.env.DATABASE_URL);
-  console.log('[DB] Connected to:', dbUrl.hostname, 'Database:', dbUrl.pathname, 'SSL:', shouldUseSSL ? 'enabled' : 'disabled');
-}
-
-// Handle connection errors gracefully
-pool.on('error', (err: Error) => {
-  console.error('Unexpected database error:', err);
-});
-
-export const query = (text: string, params?: any[]) => pool.query(text, params);
+export const query = async (text: string, params?: any[]) => {
+  if (!pool) {
+    throw new Error('Database not configured');
+  }
+  return pool.query(text, params);
+};
