@@ -2,6 +2,9 @@ import { NextResponse } from 'next/server';
 import { query } from '../../../lib/db';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
+// Force Node.js runtime for Buffer and database support
+export const runtime = 'nodejs';
+
 export async function POST(req: Request) {
   try {
     const formData = await req.formData();
@@ -35,13 +38,26 @@ export async function POST(req: Request) {
 
     // 2. Gemini AI Processing
     const geminiApiKey = process.env.GEMINI_API_KEY;
-    let result;
+    let result: {
+      transcription: string;
+      aiResponse: string;
+      audioBase64: string;
+      respectChange: number;
+    };
 
     // Audible "Beep" for diagnostic
     const TEST_BEEP = "data:audio/wav;base64,UklGRl9vT1RKdmVyc2lvbgEAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAABvT1RK";
 
-    try {
-      const systemPrompt = `You are Pierre, a French café waiter in Paris, 18ème arrondissement. You are DIRECT and speak ONLY in dialogue, never in stage directions or narrative.
+    if (!geminiApiKey) {
+      result = {
+        transcription: "[API non configurée]",
+        aiResponse: "Désolé, le service n'est pas configuré.",
+        audioBase64: TEST_BEEP,
+        respectChange: 0
+      };
+    } else {
+      try {
+        const systemPrompt = `You are Pierre, a French café waiter in Paris, 18ème arrondissement. You are DIRECT and speak ONLY in dialogue, never in stage directions or narrative.
 
 Current mood: ${userState.respect_score > 60 ? 'Polite but efficient' : 'Impatient and curt'}
 Rules:
@@ -55,51 +71,52 @@ Rules:
 Example GOOD response: "Un café. C'est noté. Autre chose ?"
 Example BAD response: "*Tapotant le carnet de commandes* Un café. *Soupir* Autre chose ?"`;
 
-      const genAI = new GoogleGenerativeAI(geminiApiKey);
-      const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' });
+        const genAI = new GoogleGenerativeAI(geminiApiKey);
+        const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' });
 
-      // Convert audio to base64
-      const audioBytes = await audioFile.arrayBuffer();
-      const audioBase64 = Buffer.from(audioBytes).toString('base64');
+        // Convert audio to base64
+        const audioBytes = await audioFile.arrayBuffer();
+        const audioBase64 = Buffer.from(audioBytes).toString('base64');
 
-      // Call Gemini with audio
-      const geminiResult = await model.generateContent([
-        {
-          inlineData: {
-            mimeType: audioFile.type || 'audio/webm',
-            data: audioBase64
-          }
-        },
-        systemPrompt
-      ]);
+        // Call Gemini with audio
+        const geminiResult = await model.generateContent([
+          {
+            inlineData: {
+              mimeType: audioFile.type || 'audio/webm',
+              data: audioBase64
+            }
+          },
+          systemPrompt
+        ]);
 
-      const response = await geminiResult.response;
-      const aiText = response.text();
+        const response = await geminiResult.response;
+        const aiText = response.text();
 
-      // Calculate respect change based on audio
-      let respectChange = 0;
-      const lowerText = aiText.toLowerCase();
-      if (lowerText.includes("s'il vous plaît") || lowerText.includes("merci")) {
-        respectChange += 2;
+        // Calculate respect change based on audio
+        let respectChange = 0;
+        const lowerText = aiText.toLowerCase();
+        if (lowerText.includes("s'il vous plaît") || lowerText.includes("merci")) {
+          respectChange += 2;
+        }
+        if (lowerText.includes("bordel") || lowerText.includes("merde")) {
+          respectChange -= 3;
+        }
+
+        result = {
+          transcription: "[Audio transcrit par Gemini]",
+          aiResponse: aiText,
+          audioBase64: "", // TTS will be added in next phase
+          respectChange: respectChange
+        };
+      } catch (err) {
+        console.error('Gemini error:', err);
+        result = {
+          transcription: "[Espace de silence]",
+          aiResponse: "Pff... je n'entends rien. Votre micro est en panne ou quoi ?",
+          audioBase64: TEST_BEEP,
+          respectChange: -1
+        };
       }
-      if (lowerText.includes("bordel") || lowerText.includes("merde")) {
-        respectChange -= 3;
-      }
-
-      result = {
-        transcription: "[Audio transcrit par Gemini]",
-        aiResponse: aiText,
-        audioBase64: "", // TTS will be added in next phase
-        respectChange: respectChange
-      };
-    } catch (err) {
-      console.error('Gemini error:', err);
-      result = {
-        transcription: "[Espace de silence]",
-        aiResponse: "Pff... je n'entends rien. Votre micro est en panne ou quoi ?",
-        audioBase64: TEST_BEEP,
-        respectChange: -1
-      };
     }
 
     const newRespectScore = Math.max(0, Math.min(100, (userState.respect_score || 50) + (result.respectChange || 0)));
