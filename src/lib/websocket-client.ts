@@ -17,7 +17,6 @@ export class VoiceWebSocket {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.host;
     
-    // Use window.WebSocket to be explicit and avoid any potential Node.js conflicts
     this.ws = new (window as any).WebSocket(`${protocol}//${host}/api/voice`);
 
     this.ws.onopen = () => {
@@ -47,16 +46,11 @@ export class VoiceWebSocket {
     };
   }
 
-  sendAudio(audioData: Float32Array) {
-    // readyState 1 is OPEN
+  // Send transcribed text to server
+  sendText(text: string) {
     if (this.ws?.readyState === 1) {
-      // Convert Float32Array to Int16Array (PCM 16-bit)
-      const pcm16 = new Int16Array(audioData.length);
-      for (let i = 0; i < audioData.length; i++) {
-        const s = Math.max(-1, Math.min(1, audioData[i]));
-        pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-      }
-      this.ws.send(pcm16.buffer);
+      console.log('[WS] Sending text:', text);
+      this.ws.send(JSON.stringify({ type: 'text', text }));
     }
   }
 

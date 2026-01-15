@@ -9,34 +9,30 @@ type ConversationMessage = {
   text: string;
 };
 
+// Type for Web Speech API
+interface SpeechRecognitionEvent {
+  results: {
+    [index: number]: {
+      [index: number]: {
+        transcript: string;
+      };
+      isFinal: boolean;
+    };
+  };
+}
+
 export default function Home() {
   const [status, setStatus] = useState('Initializing...');
   const [history, setHistory] = useState<ConversationMessage[]>([]);
   const [respectScore, setRespectScore] = useState(50);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [isVADEnabled, setIsVADEnabled] = useState(false);
+  const [isListening, setIsListening] = useState(false);
   const [pierreState, setPierreState] = useState<'idle' | 'listening' | 'thinking' | 'speaking' | 'annoyed'>('idle');
-  const [vadLoaded, setVadLoaded] = useState(false);
-  const [backgroundUrl, setBackgroundUrl] = useState<string>('');
   const [currentScenario, setCurrentScenario] = useState<any>(null);
+  const [transcript, setTranscript] = useState('');
   
   const wsRef = useRef<VoiceWebSocket | null>(null);
-  const vadRef = useRef<any>(null);
-  const [vadInstance, setVadInstance] = useState<any>(null);
-  const [isInitializingVAD, setIsInitializingVAD] = useState(false);
-
-  // Load VAD library only on client side
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      import('@ricky0123/vad-web').then((mod) => {
-        vadRef.current = mod;
-        setVadLoaded(true);
-      }).catch(err => {
-        console.error('Failed to load VAD:', err);
-        setErrorMessage('Voice detection failed to load.');
-      });
-    }
-  }, []);
+  const recognitionRef = useRef<any>(null);
 
   // Initialize WebSocket
   useEffect(() => {
@@ -45,35 +41,27 @@ export default function Home() {
       if (data.type === 'ready') {
         setCurrentScenario(data.scenario);
         setRespectScore(data.respectScore);
-        if (data.imageUrl) setBackgroundUrl(data.imageUrl);
         setStatus('Connected');
       }
 
       if (data.type === 'response') {
-        setHistory(prev => [...prev, { role: data.character || 'AI', text: data.text }]);
+        if (data.text) {
+          setHistory(prev => [...prev, { role: data.character || 'AI', text: data.text }]);
+        }
         setRespectScore(data.respectScore || 50);
         setPierreState('speaking');
-        
-        if (data.imageUrl) {
-          setBackgroundUrl(data.imageUrl);
-        }
-
-        if (data.audio) {
-          const audio = new Audio(`data:audio/mp3;base64,${data.audio}`);
-          audio.onended = () => setPierreState('idle');
-          audio.play().catch(console.error);
-        } else {
-          setTimeout(() => setPierreState('idle'), 3000);
-        }
+        setTimeout(() => setPierreState('idle'), 2000);
       }
+      
       if (data.type === 'error') {
         setErrorMessage(data.message);
         setPierreState('annoyed');
+        setTimeout(() => setPierreState('idle'), 2000);
       }
     };
 
     const onStatus = (newStatus: string) => {
-      console.log('[WS] Status changed:', newStatus);
+      console.log('[WS] Status:', newStatus);
       setStatus(newStatus);
       if (newStatus === 'Connected') setPierreState('idle');
     };
@@ -86,74 +74,97 @@ export default function Home() {
     };
   }, []);
 
-  const toggleVAD = async () => {
-    if (isInitializingVAD) return;
+  // Initialize Speech Recognition
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      console.error('[Speech] Not supported in this browser');
+      setErrorMessage('Speech recognition not supported. Try Chrome.');
+      return;
+    }
 
-    if (isVADEnabled) {
-      if (vadInstance) {
-        console.log('[VAD] Pausing...');
-        vadInstance.pause();
-      }
-      setIsVADEnabled(false);
-      setPierreState('idle');
-    } else {
-      if (!vadInstance && vadRef.current) {
-        setIsInitializingVAD(true);
-        try {
-          console.log('[VAD] Starting initialization...');
-          const myVad = await vadRef.current.MicVAD.new({
-            onSpeechStart: () => {
-              console.log('[VAD] Speech started');
-              setPierreState('listening');
-            },
-            onSpeechEnd: (audio: Float32Array) => {
-              console.log('[VAD] Speech ended, checking connection...');
-              if (wsRef.current && status === 'Connected') {
-                console.log('[VAD] Sending audio...');
-                setPierreState('thinking');
-                wsRef.current.sendAudio(audio);
-              } else {
-                console.warn('[VAD] Not connected, ignoring audio');
-                setPierreState('idle');
-              }
-            },
-          });
-          myVad.start();
-          setVadInstance(myVad);
-          setIsVADEnabled(true);
-        } catch (err) {
-          console.error('[VAD] Init error:', err);
-          setErrorMessage('Could not start microphone access.');
-        } finally {
-          setIsInitializingVAD(false);
+    const recognition = new SpeechRecognition();
+    recognition.continuous = false;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
+
+    recognition.onstart = () => {
+      console.log('[Speech] Started');
+      setIsListening(true);
+      setPierreState('listening');
+    };
+
+    recognition.onresult = (event: SpeechRecognitionEvent) => {
+      let finalTranscript = '';
+      let interimTranscript = '';
+      
+      for (let i = 0; i < Object.keys(event.results).length; i++) {
+        const result = event.results[i];
+        if (result.isFinal) {
+          finalTranscript += result[0].transcript;
+        } else {
+          interimTranscript += result[0].transcript;
         }
-      } else if (vadInstance) {
-        console.log('[VAD] Resuming...');
-        vadInstance.start();
-        setIsVADEnabled(true);
       }
+      
+      setTranscript(interimTranscript || finalTranscript);
+      
+      if (finalTranscript) {
+        console.log('[Speech] Final:', finalTranscript);
+        setHistory(prev => [...prev, { role: 'You', text: finalTranscript }]);
+        setTranscript('');
+        setPierreState('thinking');
+        wsRef.current?.sendText(finalTranscript);
+      }
+    };
+
+    recognition.onerror = (event: any) => {
+      console.error('[Speech] Error:', event.error);
+      if (event.error !== 'no-speech') {
+        setErrorMessage(`Speech error: ${event.error}`);
+      }
+      setIsListening(false);
+      setPierreState('idle');
+    };
+
+    recognition.onend = () => {
+      console.log('[Speech] Ended');
+      setIsListening(false);
+      if (pierreState === 'listening') {
+        setPierreState('idle');
+      }
+    };
+
+    recognitionRef.current = recognition;
+  }, []);
+
+  const toggleListening = () => {
+    if (!recognitionRef.current) {
+      setErrorMessage('Speech recognition not available');
+      return;
+    }
+
+    if (isListening) {
+      recognitionRef.current.stop();
+    } else {
+      setTranscript('');
+      recognitionRef.current.start();
     }
   };
 
   return (
     <main className="flex min-h-screen flex-col items-center p-4 md:p-8 bg-[#050505] text-[#e0e0e0] font-sans selection:bg-red-900 transition-all duration-1000 overflow-hidden">
       
-      {/* REACTIVE BACKGROUND (FLUX Generated) */}
-      <div className="fixed inset-0 pointer-events-none transition-all duration-1000 ease-in-out">
-        {backgroundUrl ? (
-          <img 
-            src={backgroundUrl} 
-            className="w-full h-full object-cover opacity-30 blur-[2px] scale-105"
-            alt="Background"
-          />
-        ) : (
-          <div className="w-full h-full bg-zinc-900 opacity-20"></div>
-        )}
+      {/* Background */}
+      <div className="fixed inset-0 pointer-events-none">
+        <div className="w-full h-full bg-zinc-900 opacity-20"></div>
         <div className="absolute inset-0 bg-gradient-to-b from-black/80 via-transparent to-black/90"></div>
         <div className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[1000px] h-[1000px] bg-red-950/10 blur-[150px] rounded-full transition-all duration-1000 ${pierreState === 'listening' ? 'scale-125 opacity-40' : 'scale-100 opacity-20'}`}></div>
       </div>
 
-      {/* Header / Dossier Info */}
+      {/* Header */}
       <div className="w-full max-w-6xl flex justify-between items-center z-20 border-b border-white/5 pb-8 mb-12 backdrop-blur-sm">
         <div className="flex items-center gap-4">
           <div className="bg-white text-black px-3 py-1 font-black text-2xl tracking-tighter">RAW</div>
@@ -161,7 +172,7 @@ export default function Home() {
           <div>
             <h1 className="text-sm font-bold tracking-[0.3em] uppercase text-zinc-400">Social Friction Engine</h1>
             <p className="text-[10px] uppercase tracking-widest text-zinc-600 font-bold mt-1">
-              {currentScenario?.location || 'System Initializing...'}
+              {currentScenario?.location || 'Loading...'}
             </p>
           </div>
         </div>
@@ -169,7 +180,7 @@ export default function Home() {
         <div className="flex items-center gap-10">
           <div className="hidden md:block">
             <p className="text-[9px] uppercase tracking-[0.2em] text-zinc-500 font-black mb-2 flex items-center gap-2">
-              <Shield size={10} /> Reputation Status
+              <Shield size={10} /> Reputation
             </p>
             <div className="flex items-center gap-3">
               <div className="w-32 h-1 bg-zinc-900 rounded-full overflow-hidden">
@@ -183,17 +194,17 @@ export default function Home() {
           </div>
           
           <button 
-            onClick={toggleVAD}
-            disabled={!vadLoaded}
+            onClick={toggleListening}
+            disabled={status !== 'Connected'}
             className={`group relative p-5 rounded-xl border transition-all active:scale-95 ${
-              isVADEnabled 
-                ? 'bg-red-600 border-red-500 text-white shadow-[0_0_30px_rgba(220,38,38,0.4)]' 
+              isListening 
+                ? 'bg-red-600 border-red-500 text-white shadow-[0_0_30px_rgba(220,38,38,0.4)] animate-pulse' 
                 : 'bg-zinc-900 border-white/5 text-zinc-500 hover:border-white/20'
-            } ${!vadLoaded && 'opacity-30 cursor-not-allowed'}`}
+            } ${status !== 'Connected' && 'opacity-30 cursor-not-allowed'}`}
           >
-            {isVADEnabled ? <Mic size={28} /> : <MicOff size={28} />}
+            {isListening ? <Mic size={28} /> : <MicOff size={28} />}
             <span className="absolute -bottom-8 left-1/2 -translate-x-1/2 text-[8px] uppercase tracking-widest font-black whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity">
-              {isVADEnabled ? 'Mic Active' : 'Mic Off'}
+              {isListening ? 'Listening...' : 'Click to Speak'}
             </span>
           </button>
         </div>
@@ -204,17 +215,13 @@ export default function Home() {
         {/* Interaction Area */}
         <div className="flex-1 flex flex-col items-center justify-center space-y-12">
           <div className="relative">
-            {/* The Avatar Frame */}
             <div className={`w-64 h-64 rounded-2xl border transition-all duration-700 flex items-center justify-center overflow-hidden bg-black/40 backdrop-blur-xl ${
               pierreState === 'listening' ? 'border-red-500/50 scale-105 shadow-[0_0_60px_rgba(239,68,68,0.15)]' :
               pierreState === 'speaking' ? 'border-emerald-500/50 shadow-[0_0_60px_rgba(16,185,129,0.15)]' :
+              pierreState === 'thinking' ? 'border-yellow-500/50' :
               pierreState === 'annoyed' ? 'border-orange-600 animate-shake' : 'border-white/5'
             }`}>
-              {backgroundUrl ? (
-                <img src={backgroundUrl} className={`w-full h-full object-cover transition-all duration-1000 ${pierreState === 'thinking' ? 'grayscale opacity-50' : 'opacity-80'}`} />
-              ) : (
-                <Coffee size={100} className="text-zinc-800" />
-              )}
+              <Coffee size={100} className="text-zinc-800" />
             </div>
             
             {pierreState === 'thinking' && (
@@ -226,11 +233,16 @@ export default function Home() {
 
           <div className="text-center space-y-4">
             <h2 className="text-3xl font-black text-white uppercase tracking-tighter">
-              {pierreState === 'listening' ? 'System Listening...' :
-               pierreState === 'thinking' ? 'Processing...' :
-               pierreState === 'speaking' ? `${currentScenario?.character || 'Character'} Speaking` :
-               pierreState === 'annoyed' ? 'Friction Detected' : 'Ready'}
+              {pierreState === 'listening' ? 'Listening...' :
+               pierreState === 'thinking' ? 'Pierre is thinking...' :
+               pierreState === 'speaking' ? `${currentScenario?.character || 'Pierre'} responds` :
+               pierreState === 'annoyed' ? 'Hmph!' : 'Click mic to speak'}
             </h2>
+            
+            {transcript && (
+              <p className="text-lg text-zinc-400 italic">"{transcript}"</p>
+            )}
+            
             <div className="flex justify-center gap-4 text-[10px] uppercase tracking-widest font-bold text-zinc-500">
               <span className="flex items-center gap-1"><Globe size={12} /> {currentScenario?.location || 'Paris'}</span>
               <span className="flex items-center gap-1"><User size={12} /> {currentScenario?.character || 'Pierre'}</span>
@@ -241,22 +253,24 @@ export default function Home() {
         {/* Chat / Transcript Area */}
         <div className="w-full md:w-[480px] flex flex-col bg-zinc-950/40 backdrop-blur-2xl border border-white/5 rounded-2xl overflow-hidden shadow-2xl">
           <div className="p-5 border-b border-white/5 flex justify-between items-center bg-white/5">
-            <span className="text-[10px] uppercase tracking-[0.3em] font-black text-zinc-400">Scenario Log</span>
-            <div className="px-2 py-0.5 rounded bg-red-600/10 text-red-500 text-[8px] font-black uppercase tracking-widest">Live Feed</div>
+            <span className="text-[10px] uppercase tracking-[0.3em] font-black text-zinc-400">Conversation</span>
+            <div className={`px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest ${status === 'Connected' ? 'bg-emerald-600/10 text-emerald-500' : 'bg-red-600/10 text-red-500'}`}>
+              {status}
+            </div>
           </div>
           
           <div className="flex-1 overflow-y-auto p-8 space-y-8 scrollbar-hide max-h-[500px]">
             {history.length === 0 && (
               <div className="h-full flex flex-col items-center justify-center opacity-20 text-center px-8 py-20">
                 <MessageSquare size={48} className="mb-6" />
-                <p className="text-sm italic font-serif">"Begin your conduct. The record is active."</p>
+                <p className="text-sm italic font-serif">"Click the microphone and speak to Pierre"</p>
               </div>
             )}
             
             {history.map((msg, i) => (
               <div key={i} className={`flex flex-col ${msg.role === 'You' ? 'items-end' : 'items-start'} animate-fade-in`}>
                 <span className="text-[9px] uppercase tracking-widest text-zinc-600 font-black mb-2">
-                  {msg.role === 'You' ? 'SUBJECT' : (currentScenario?.character?.toUpperCase() || 'AI')}
+                  {msg.role === 'You' ? 'YOU' : (currentScenario?.character?.toUpperCase() || 'PIERRE')}
                 </span>
                 <div className={`max-w-[90%] px-5 py-4 rounded-xl ${
                   msg.role === 'You' 
