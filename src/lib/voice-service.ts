@@ -100,8 +100,15 @@ export async function handleVoiceWebSocket(ws: WebSocket) {
           null // placeholder
         ]);
 
-        const responseText = geminiResult.response.text();
-        const parsedResponse = JSON.parse(responseText);
+        let parsedResponse;
+        try {
+          // Remove potential markdown backticks from LLM response
+          const cleanText = responseText.replace(/```json|```/g, '').trim();
+          parsedResponse = JSON.parse(cleanText);
+        } catch (e) {
+          console.error('[VoiceService] Failed to parse AI response:', responseText);
+          parsedResponse = { text: responseText, respectDelta: 0 };
+        }
 
         // Update score
         currentRespectScore = Math.max(0, Math.min(100, currentRespectScore + (parsedResponse.respectDelta || 0)));
@@ -122,6 +129,7 @@ export async function handleVoiceWebSocket(ws: WebSocket) {
         ws.send(JSON.stringify({
           type: 'response',
           text: parsedResponse.text,
+          character: currentScenario.character,
           respectScore: currentRespectScore,
           imageUrl: reactiveBgUrl || undefined
         }));
