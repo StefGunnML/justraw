@@ -98,6 +98,8 @@ export default function Home() {
       setPierreState('listening');
     };
 
+    let speechTimeout: NodeJS.Timeout | null = null;
+    
     recognition.onresult = (event: SpeechRecognitionEvent) => {
       console.log('[Speech] Got result');
       let finalTranscript = '';
@@ -114,9 +116,25 @@ export default function Home() {
       
       setTranscript(interimTranscript || finalTranscript);
       
+      // Auto-send after 2 seconds of silence
+      if (speechTimeout) clearTimeout(speechTimeout);
+      speechTimeout = setTimeout(() => {
+        const currentText = interimTranscript || finalTranscript;
+        if (currentText.trim()) {
+          console.log('[Speech] Auto-sending after pause:', currentText);
+          recognition.stop();
+          setHistory(prev => [...prev, { role: 'You', text: currentText }]);
+          setTranscript('');
+          setPierreState('thinking');
+          setIsListening(false);
+          wsRef.current?.sendText(currentText);
+        }
+      }, 2000);
+      
       if (finalTranscript && finalTranscript.trim()) {
         console.log('[Speech] Final transcript:', finalTranscript);
-        recognition.stop(); // Force stop after final result
+        if (speechTimeout) clearTimeout(speechTimeout);
+        recognition.stop();
         setHistory(prev => [...prev, { role: 'You', text: finalTranscript }]);
         setTranscript('');
         setPierreState('thinking');
@@ -152,26 +170,29 @@ export default function Home() {
     }
 
     if (isListening) {
-      console.log('[Speech] Stopping...');
+      console.log('[Speech] Manual stop - sending current text');
+      // Send whatever we have so far
+      if (transcript.trim()) {
+        setHistory(prev => [...prev, { role: 'You', text: transcript }]);
+        wsRef.current?.sendText(transcript);
+        setPierreState('thinking');
+        setTranscript('');
+      } else {
+        setPierreState('idle');
+      }
       recognitionRef.current.stop();
       setIsListening(false);
-      setPierreState('idle');
     } else {
       console.log('[Speech] Starting...');
       setTranscript('');
+      setErrorMessage(null);
       try {
         recognitionRef.current.start();
-        // Auto-timeout after 10 seconds if nothing detected
-        setTimeout(() => {
-          if (recognitionRef.current && isListening) {
-            console.log('[Speech] Timeout - stopping');
-            recognitionRef.current.stop();
-          }
-        }, 10000);
       } catch (e: any) {
         console.error('[Speech] Start error:', e);
         if (e.message?.includes('already started')) {
           recognitionRef.current.stop();
+          setTimeout(() => recognitionRef.current?.start(), 100);
         }
       }
     }
@@ -264,6 +285,10 @@ export default function Home() {
             
             {transcript && (
               <p className="text-lg text-zinc-400 italic">"{transcript}"</p>
+            )}
+            
+            {pierreState === 'listening' && (
+              <p className="text-xs text-zinc-500 animate-pulse">Click mic again to send</p>
             )}
             
             <div className="flex justify-center gap-4 text-[10px] uppercase tracking-widest font-bold text-zinc-500">
