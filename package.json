@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "node server.js",
-    "build": "next build && tsc --project tsconfig.server.json",
+    "build": "next build",
     "start": "NODE_ENV=production node server.js",
     "lint": "next lint",
     "db:init": "node scripts/init-db.js",

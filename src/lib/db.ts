@@ -40,6 +40,10 @@ if (!isBuilding && process.env.DATABASE_URL) {
 
 export const query = async (text: string, params?: any[]) => {
   if (!pool) {
+    if (isBuilding) {
+      console.warn('[DB] Query skipped during build time');
+      return { rows: [] };
+    }
     throw new Error('Database not configured');
   }
   return pool.query(text, params);
