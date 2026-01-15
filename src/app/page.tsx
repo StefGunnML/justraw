@@ -23,6 +23,7 @@ export default function Home() {
   const wsRef = useRef<VoiceWebSocket | null>(null);
   const vadRef = useRef<any>(null);
   const [vadInstance, setVadInstance] = useState<any>(null);
+  const [isInitializingVAD, setIsInitializingVAD] = useState(false);
 
   // Load VAD library only on client side
   useEffect(() => {
@@ -40,6 +41,7 @@ export default function Home() {
   // Initialize WebSocket
   useEffect(() => {
     const onMessage = (data: any) => {
+      console.log('[WS] Received message:', data.type);
       if (data.type === 'ready') {
         setCurrentScenario(data.scenario);
         setRespectScore(data.respectScore);
@@ -71,6 +73,7 @@ export default function Home() {
     };
 
     const onStatus = (newStatus: string) => {
+      console.log('[WS] Status changed:', newStatus);
       setStatus(newStatus);
       if (newStatus === 'Connected') setPierreState('idle');
     };
@@ -84,33 +87,45 @@ export default function Home() {
   }, []);
 
   const toggleVAD = async () => {
+    if (isInitializingVAD) return;
+
     if (isVADEnabled) {
-      if (vadInstance) vadInstance.pause();
+      if (vadInstance) {
+        console.log('[VAD] Pausing...');
+        vadInstance.pause();
+      }
       setIsVADEnabled(false);
       setPierreState('idle');
     } else {
       if (!vadInstance && vadRef.current) {
+        setIsInitializingVAD(true);
         try {
+          console.log('[VAD] Starting initialization...');
           const myVad = await vadRef.current.MicVAD.new({
             onSpeechStart: () => {
+              console.log('[VAD] Speech started');
               setPierreState('listening');
             },
             onSpeechEnd: (audio: Float32Array) => {
+              console.log('[VAD] Speech ended, sending audio...');
               setPierreState('thinking');
               if (wsRef.current) wsRef.current.sendAudio(audio);
             },
           });
           myVad.start();
           setVadInstance(myVad);
+          setIsVADEnabled(true);
         } catch (err) {
-          console.error('VAD init error:', err);
+          console.error('[VAD] Init error:', err);
           setErrorMessage('Could not start microphone access.');
-          return;
+        } finally {
+          setIsInitializingVAD(false);
         }
       } else if (vadInstance) {
+        console.log('[VAD] Resuming...');
         vadInstance.start();
+        setIsVADEnabled(true);
       }
-      setIsVADEnabled(true);
     }
   };
 
