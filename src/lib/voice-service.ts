@@ -3,16 +3,41 @@ import { GoogleGenerativeAI, ChatSession } from '@google/generative-ai';
 import { query } from './db';
 import { ragEngine } from './rag-engine';
 import { SCENARIOS, Scenario } from './scenarios';
-import { imageService } from './image-service';
 
 // Extend WebSocket to include our session-specific data
 interface VoiceWebSocket extends WebSocket {
   chat?: ChatSession;
-  systemPrompt?: string;
 }
 
 const apiKey = process.env.GEMINI_API_KEY || '';
 const genAI = apiKey ? new GoogleGenerativeAI(apiKey) : null;
+
+// Convert PCM Int16 to WAV format (Gemini needs proper audio formats)
+function pcmToWav(pcmData: Buffer, sampleRate: number = 16000, channels: number = 1, bitsPerSample: number = 16): Buffer {
+  const dataLength = pcmData.length;
+  const header = Buffer.alloc(44);
+  
+  // RIFF header
+  header.write('RIFF', 0);
+  header.writeUInt32LE(36 + dataLength, 4);
+  header.write('WAVE', 8);
+  
+  // fmt chunk
+  header.write('fmt ', 12);
+  header.writeUInt32LE(16, 16); // Subchunk1Size (16 for PCM)
+  header.writeUInt16LE(1, 20); // AudioFormat (1 = PCM)
+  header.writeUInt16LE(channels, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(sampleRate * channels * bitsPerSample / 8, 28); // ByteRate
+  header.writeUInt16LE(channels * bitsPerSample / 8, 32); // BlockAlign
+  header.writeUInt16LE(bitsPerSample, 34);
+  
+  // data chunk
+  header.write('data', 36);
+  header.writeUInt32LE(dataLength, 40);
+  
+  return Buffer.concat([header, pcmData]);
+}
 
 export async function handleVoiceWebSocket(ws: VoiceWebSocket) {
   if (!genAI) {
@@ -22,25 +47,27 @@ export async function handleVoiceWebSocket(ws: VoiceWebSocket) {
     return;
   }
   
-  console.log('[VoiceService] Initializing Gemini Multimodal Live...');
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' });
+  console.log('[VoiceService] Initializing Gemini...');
+  const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' }); // Using stable model
   
-  const userId = '69556352-840f-45ff-9a8a-6b2a2ce074fa'; // Default user
+  const userId = '69556352-840f-45ff-9a8a-6b2a2ce074fa';
   let conversationContext = "";
   let currentScenario: Scenario = SCENARIOS['paris-cafe'];
   let currentRespectScore = 50;
 
-  // Immediate message listener to avoid race conditions
   let isProcessing = false;
   const handleMessage = async (data: Buffer | string) => {
-    if (isProcessing) return;
+    if (isProcessing) {
+      console.log('[VoiceService] Busy, skipping...');
+      return;
+    }
     isProcessing = true;
 
     try {
       const dataString = data.toString();
       if (dataString.startsWith('{')) {
         const msg = JSON.parse(dataString);
-        console.log(`[VoiceService] Received control message: ${msg.type}`);
+        console.log(`[VoiceService] Control: ${msg.type}`);
         
         if (msg.type === 'start') {
           if (msg.scenarioId && SCENARIOS[msg.scenarioId]) {
@@ -50,17 +77,14 @@ export async function handleVoiceWebSocket(ws: VoiceWebSocket) {
           const memories = await ragEngine.recallMemories(userId, currentScenario.id, 5);
           const memoryContext = memories.map((m: any) => `- ${m.content}`).join('\n');
 
-          const fullSystemPrompt = `${currentScenario.systemPrompt}
+          const systemPrompt = `${currentScenario.systemPrompt}
             Location: ${currentScenario.location}
             Current Respect Score: ${currentRespectScore}/100
-            Memory of previous interactions:
-            ${memoryContext || "None."}`;
+            Memory: ${memoryContext || "None."}`;
 
           const chat = model.startChat({
             history: [],
-            systemInstruction: {
-              parts: [{ text: fullSystemPrompt }]
-            },
+            systemInstruction: { parts: [{ text: systemPrompt }] },
             generationConfig: { 
               responseMimeType: "application/json",
               temperature: 0.7,
@@ -69,47 +93,42 @@ export async function handleVoiceWebSocket(ws: VoiceWebSocket) {
 
           ws.chat = chat;
           
-          console.log(`[VoiceService] Sending immediate ready for scenario: ${currentScenario.id}`);
+          console.log(`[VoiceService] Ready: ${currentScenario.id}`);
           ws.send(JSON.stringify({ 
             type: 'ready', 
             scenario: currentScenario, 
             respectScore: currentRespectScore 
           }));
-
-          imageService.generateBackground(
-            `${currentScenario.visualBasePrompt}. Mood: ${currentScenario.initialMood}`,
-            currentScenario.referenceImages
-          ).then(bgUrl => {
-            if (bgUrl && ws.readyState === 1) {
-              ws.send(JSON.stringify({ 
-                type: 'response',
-                text: '', 
-                character: currentScenario.character,
-                imageUrl: bgUrl 
-              }));
-            }
-          }).catch(err => console.error('[VoiceService] Background failed:', err));
-
           return;
         }
       }
 
       const chat = ws.chat;
       if (!chat) {
-        console.warn('[VoiceService] Audio received before handshake');
+        console.warn('[VoiceService] No chat session');
+        isProcessing = false;
         return;
       }
 
-      console.log(`[VoiceService] Processing audio (${data.length} bytes)`);
+      // Process audio data
+      const audioBuffer = Buffer.isBuffer(data) ? data : Buffer.from(data);
+      console.log(`[VoiceService] Audio: ${audioBuffer.length} bytes`);
+      
+      // Convert raw PCM to WAV format
+      const wavBuffer = pcmToWav(audioBuffer, 16000, 1, 16);
+      const wavBase64 = wavBuffer.toString('base64');
+
       const audioPart = {
         inlineData: {
-          data: Buffer.isBuffer(data) ? data.toString('base64') : Buffer.from(data).toString('base64'),
-          mimeType: 'audio/l16;rate=16000'
+          data: wavBase64,
+          mimeType: 'audio/wav'
         }
       };
 
+      console.log('[VoiceService] Sending WAV to Gemini...');
       const geminiResult = await chat.sendMessage([audioPart]);
       const responseText = geminiResult.response.text();
+      console.log('[VoiceService] Gemini response received');
 
       let parsedResponse;
       try {
@@ -124,26 +143,16 @@ export async function handleVoiceWebSocket(ws: VoiceWebSocket) {
       
       conversationContext += `User: [Audio]\n${currentScenario.character}: ${parsedResponse.text}\n`;
 
-      let reactiveBgUrl = "";
-      if (parsedResponse.respectDelta !== 0) {
-        const moodDesc = currentRespectScore < 40 ? "angry and dark" : currentRespectScore > 70 ? "welcoming and bright" : "neutral";
-        reactiveBgUrl = await imageService.generateBackground(
-          `${currentScenario.visualBasePrompt}. The atmosphere is now ${moodDesc}.`,
-          currentScenario.referenceImages
-        );
-      }
-
       ws.send(JSON.stringify({
         type: 'response',
         text: parsedResponse.text,
         character: currentScenario.character,
-        respectScore: currentRespectScore,
-        imageUrl: reactiveBgUrl || undefined
+        respectScore: currentRespectScore
       }));
 
-    } catch (err) {
-      console.error('[VoiceService] error:', err);
-      ws.send(JSON.stringify({ type: 'error', message: 'Something went wrong.' }));
+    } catch (err: any) {
+      console.error('[VoiceService] Error:', err.message || err);
+      ws.send(JSON.stringify({ type: 'error', message: 'Processing failed. Try again.' }));
     } finally {
       isProcessing = false;
     }
@@ -154,6 +163,7 @@ export async function handleVoiceWebSocket(ws: VoiceWebSocket) {
   try {
     const userRes = await query('SELECT * FROM user_dossier WHERE user_id = $1', [userId]);
     currentRespectScore = userRes.rows[0]?.respect_score || 50;
+    console.log(`[VoiceService] User loaded. Score: ${currentRespectScore}`);
     
     ws.on('close', async () => {
       if (conversationContext) {
