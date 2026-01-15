@@ -107,9 +107,15 @@ export default function Home() {
               setPierreState('listening');
             },
             onSpeechEnd: (audio: Float32Array) => {
-              console.log('[VAD] Speech ended, sending audio...');
-              setPierreState('thinking');
-              if (wsRef.current) wsRef.current.sendAudio(audio);
+              console.log('[VAD] Speech ended, checking connection...');
+              if (wsRef.current && status === 'Connected') {
+                console.log('[VAD] Sending audio...');
+                setPierreState('thinking');
+                wsRef.current.sendAudio(audio);
+              } else {
+                console.warn('[VAD] Not connected, ignoring audio');
+                setPierreState('idle');
+              }
             },
           });
           myVad.start();

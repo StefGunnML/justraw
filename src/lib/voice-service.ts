@@ -31,8 +31,11 @@ export async function handleVoiceWebSocket(ws: VoiceWebSocket) {
   let currentRespectScore = 50;
 
   // Immediate message listener to avoid race conditions
-  const messageQueue: (Buffer | string)[] = [];
+  let isProcessing = false;
   const handleMessage = async (data: Buffer | string) => {
+    if (isProcessing) return;
+    isProcessing = true;
+
     try {
       const dataString = data.toString();
       if (dataString.startsWith('{')) {
@@ -40,12 +43,10 @@ export async function handleVoiceWebSocket(ws: VoiceWebSocket) {
         console.log(`[VoiceService] Received control message: ${msg.type}`);
         
         if (msg.type === 'start') {
-          // Allow client to pick a scenario
           if (msg.scenarioId && SCENARIOS[msg.scenarioId]) {
             currentScenario = SCENARIOS[msg.scenarioId];
           }
           
-          // Recall past memories for this user
           const memories = await ragEngine.recallMemories(userId, currentScenario.id, 5);
           const memoryContext = memories.map((m: any) => `- ${m.content}`).join('\n');
 
@@ -55,49 +56,51 @@ export async function handleVoiceWebSocket(ws: VoiceWebSocket) {
             Memory of previous interactions:
             ${memoryContext || "None."}`;
 
-          // Initialize chat with history and system instruction
           const chat = model.startChat({
             history: [],
-            systemInstruction: fullSystemPrompt,
+            systemInstruction: {
+              parts: [{ text: fullSystemPrompt }]
+            },
             generationConfig: { 
               responseMimeType: "application/json",
               temperature: 0.7,
             }
           });
 
-          // Store chat in the socket object
           ws.chat = chat;
-          // ws.systemPrompt is no longer needed as a separate variable for sendMessage
-          ws.systemPrompt = undefined; 
-
-          console.log(`[VoiceService] Requesting initial background for scenario: ${currentScenario.id}`);
-          // Generate initial background
-          const bgUrl = await imageService.generateBackground(
-            `${currentScenario.visualBasePrompt}. Mood: ${currentScenario.initialMood}`,
-            currentScenario.referenceImages
-          );
-
-          console.log(`[VoiceService] Background generated: ${bgUrl ? 'success' : 'failed'}. Sending ready.`);
+          
+          console.log(`[VoiceService] Sending immediate ready for scenario: ${currentScenario.id}`);
           ws.send(JSON.stringify({ 
             type: 'ready', 
-            scenario: currentScenario,
-            respectScore: currentRespectScore,
-            imageUrl: bgUrl
+            scenario: currentScenario, 
+            respectScore: currentRespectScore 
           }));
+
+          imageService.generateBackground(
+            `${currentScenario.visualBasePrompt}. Mood: ${currentScenario.initialMood}`,
+            currentScenario.referenceImages
+          ).then(bgUrl => {
+            if (bgUrl && ws.readyState === 1) {
+              ws.send(JSON.stringify({ 
+                type: 'response',
+                text: '', 
+                character: currentScenario.character,
+                imageUrl: bgUrl 
+              }));
+            }
+          }).catch(err => console.error('[VoiceService] Background failed:', err));
+
           return;
         }
       }
 
-      // Handle Audio Binary Data
       const chat = ws.chat;
-      
       if (!chat) {
-        console.warn('[VoiceService] Received audio before start handshake');
+        console.warn('[VoiceService] Audio received before handshake');
         return;
       }
 
       console.log(`[VoiceService] Processing audio (${data.length} bytes)`);
-      
       const audioPart = {
         inlineData: {
           data: Buffer.isBuffer(data) ? data.toString('base64') : Buffer.from(data).toString('base64'),
@@ -105,27 +108,22 @@ export async function handleVoiceWebSocket(ws: VoiceWebSocket) {
         }
       };
 
-      // Send to Gemini (without passing systemPrompt again)
       const geminiResult = await chat.sendMessage([audioPart]);
       const responseText = geminiResult.response.text();
 
       let parsedResponse;
       try {
-        // Remove potential markdown backticks from LLM response
         const cleanText = responseText.replace(/```json|```/g, '').trim();
         parsedResponse = JSON.parse(cleanText);
       } catch (e) {
-        console.error('[VoiceService] Failed to parse AI response:', responseText);
         parsedResponse = { text: responseText, respectDelta: 0 };
       }
 
-      // Update score
       currentRespectScore = Math.max(0, Math.min(100, currentRespectScore + (parsedResponse.respectDelta || 0)));
       await query('UPDATE user_dossier SET respect_score = $1, last_interaction = NOW() WHERE user_id = $2', [currentRespectScore, userId]);
       
       conversationContext += `User: [Audio]\n${currentScenario.character}: ${parsedResponse.text}\n`;
 
-      // Now generate a dynamic background based on the mood shift
       let reactiveBgUrl = "";
       if (parsedResponse.respectDelta !== 0) {
         const moodDesc = currentRespectScore < 40 ? "angry and dark" : currentRespectScore > 70 ? "welcoming and bright" : "neutral";
@@ -146,6 +144,8 @@ export async function handleVoiceWebSocket(ws: VoiceWebSocket) {
     } catch (err) {
       console.error('[VoiceService] error:', err);
       ws.send(JSON.stringify({ type: 'error', message: 'Something went wrong.' }));
+    } finally {
+      isProcessing = false;
     }
   };
 
@@ -154,7 +154,6 @@ export async function handleVoiceWebSocket(ws: VoiceWebSocket) {
   try {
     const userRes = await query('SELECT * FROM user_dossier WHERE user_id = $1', [userId]);
     currentRespectScore = userRes.rows[0]?.respect_score || 50;
-    console.log(`[VoiceService] User loaded. Respect Score: ${currentRespectScore}`);
     
     ws.on('close', async () => {
       if (conversationContext) {
