@@ -1,12 +1,17 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { query } from './db';
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
+const apiKey = process.env.GEMINI_API_KEY || '';
+const genAI = apiKey ? new GoogleGenerativeAI(apiKey) : null;
 
 export class RAGEngine {
-  private model = genAI.getGenerativeModel({ model: 'text-embedding-004' });
+  private model = genAI ? genAI.getGenerativeModel({ model: 'text-embedding-004' }) : null;
 
   async addMemory(userId: string, content: string, metadata: any = {}) {
+    if (!this.model) {
+      console.warn('[RAG] No Gemini API key, skipping memory addition');
+      return;
+    }
     try {
       console.log(`[RAG] Generating embedding for memory: "${content.substring(0, 50)}..."`);
       
@@ -25,6 +30,10 @@ export class RAGEngine {
   }
 
   async recallMemories(userId: string, searchText: string, limit: number = 3) {
+    if (!this.model) {
+      console.warn('[RAG] No Gemini API key, skipping memory recall');
+      return [];
+    }
     try {
       console.log(`[RAG] Recalling memories for: "${searchText}"`);
       
@@ -49,6 +58,7 @@ export class RAGEngine {
   }
 
   async summarizeAndStore(userId: string, conversationHistory: string) {
+    if (!genAI) return;
     // This could be called at the end of a session
     const summaryModel = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
     const prompt = `Summarize the key facts about this user and their interaction in 1-2 sentences for long-term memory: \n\n${conversationHistory}`;

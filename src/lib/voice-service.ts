@@ -3,9 +3,17 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { query } from './db';
 import { ragEngine } from './rag-engine';
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
+const apiKey = process.env.GEMINI_API_KEY || '';
+const genAI = apiKey ? new GoogleGenerativeAI(apiKey) : null;
 
 export async function handleVoiceWebSocket(ws: WebSocket) {
+  if (!genAI) {
+    console.error('[VoiceService] No Gemini API key configured');
+    ws.send(JSON.stringify({ type: 'error', message: 'API key missing' }));
+    ws.close();
+    return;
+  }
+  
   console.log('[VoiceService] Initializing Gemini Multimodal Live...');
 
   // Use the latest experimental model for multimodal live

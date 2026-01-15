@@ -1,16 +1,19 @@
 {
   "compilerOptions": {
-    "target": "ESNext",
-    "module": "CommonJS",
-    "moduleResolution": "node",
+    "target": "es2020",
+    "module": "commonjs",
+    "lib": ["es2020", "dom"],
     "outDir": "./dist",
-    "rootDir": "src",
+    "rootDir": ".",
+    "strict": false,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "strict": false,
+    "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
-    "lib": ["ESNext", "DOM"]
+    "noEmitOnError": false,
+    "moduleResolution": "node",
+    "allowJs": true
   },
-  "include": ["src/lib/**/*.ts"],
-  "exclude": ["node_modules"]
+  "include": ["src/lib/**/*.ts", "server.js", "src/lib/voice-service.ts"],
+  "exclude": ["node_modules", "src/app/**/*"]
 }

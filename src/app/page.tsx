@@ -1,11 +1,8 @@
 'use client';
 
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Mic, Loader2, Coffee, AlertCircle, MessageSquare, MicOff } from 'lucide-react';
 import { VoiceWebSocket } from '../lib/websocket-client';
-
-// Dynamic import for VAD to avoid SSR issues
-import dynamic from 'next/dynamic';
 
 type ConversationMessage = {
   role: string;
@@ -23,14 +20,22 @@ export default function Home() {
   
   const wsRef = useRef<VoiceWebSocket | null>(null);
   const vadRef = useRef<any>(null);
+  const [vadInstance, setVadInstance] = useState<any>(null);
 
-  // Load VAD dynamically on client
+  // Load VAD library only on client side
   useEffect(() => {
-    import('@ricky0123/vad-web').then((mod) => {
-      vadRef.current = mod;
-      setVadLoaded(true);
-    }).catch(console.error);
+    if (typeof window !== 'undefined') {
+      import('@ricky0123/vad-web').then((mod) => {
+        vadRef.current = mod;
+        setVadLoaded(true);
+      }).catch(err => {
+        console.error('Failed to load VAD:', err);
+        setErrorMessage('Voice detection failed to load.');
+      });
+    }
   }, []);
+
+  // Initialize WebSocket
   useEffect(() => {
     const onMessage = (data: any) => {
       if (data.type === 'response') {
@@ -38,12 +43,13 @@ export default function Home() {
         setRespectScore(data.respectScore || 50);
         setPierreState('speaking');
         
-        // Handle audio response if provided
+        // Handle audio if provided (optional feature)
         if (data.audio) {
           const audio = new Audio(`data:audio/mp3;base64,${data.audio}`);
           audio.onended = () => setPierreState('idle');
           audio.play().catch(console.error);
         } else {
+          // Fallback if no audio
           setTimeout(() => setPierreState('idle'), 3000);
         }
       }
@@ -61,11 +67,10 @@ export default function Home() {
     wsRef.current = new VoiceWebSocket(onMessage, onStatus);
     wsRef.current.connect();
 
-    return () => wsRef.current?.disconnect();
+    return () => {
+      wsRef.current?.disconnect();
+    };
   }, []);
-
-  // 2. VAD Logic
-  const [vadInstance, setVadInstance] = useState<any>(null);
 
   const toggleVAD = async () => {
     if (isVADEnabled) {
@@ -80,7 +85,7 @@ export default function Home() {
               console.log('Speech started');
               setPierreState('listening');
             },
-            onSpeechEnd: (audio: any) => {
+            onSpeechEnd: (audio: Float32Array) => {
               console.log('Speech ended');
               setPierreState('thinking');
               if (wsRef.current) wsRef.current.sendAudio(audio);
@@ -90,7 +95,7 @@ export default function Home() {
           setVadInstance(myVad);
         } catch (err) {
           console.error('VAD init error:', err);
-          setErrorMessage('Could not start voice detection.');
+          setErrorMessage('Could not start microphone access.');
           return;
         }
       } else if (vadInstance) {
@@ -102,13 +107,13 @@ export default function Home() {
 
   return (
     <main className="flex min-h-screen flex-col items-center p-4 md:p-8 bg-[#0a0a0a] text-[#e0e0e0] font-serif selection:bg-red-900">
-      {/* Background Ambience / Visuals */}
+      {/* Visual Background Effects */}
       <div className="fixed inset-0 pointer-events-none opacity-20 overflow-hidden">
         <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/dark-leather.png')]"></div>
         <div className={`absolute top-1/4 left-1/2 -translate-x-1/2 w-[800px] h-[800px] bg-red-950/20 blur-[120px] rounded-full transition-all duration-1000 ${pierreState === 'listening' ? 'scale-110 opacity-40' : 'scale-100 opacity-20'}`}></div>
       </div>
 
-      {/* Top Bar */}
+      {/* Header / Dossier Info */}
       <div className="w-full max-w-4xl flex justify-between items-center z-10 border-b border-zinc-800 pb-6 mb-8">
         <div>
           <h1 className="text-3xl font-black tracking-tighter uppercase italic text-zinc-100">Café JustRaw</h1>
@@ -131,21 +136,21 @@ export default function Home() {
           
           <button 
             onClick={toggleVAD}
+            disabled={!vadLoaded}
             className={`p-4 rounded-full border transition-all active:scale-95 ${
               isVADEnabled 
                 ? 'bg-red-950/30 border-red-900 text-red-500 shadow-[0_0_20px_rgba(153,27,27,0.2)]' 
                 : 'bg-zinc-900 border-zinc-800 text-zinc-500'
-            }`}
+            } ${!vadLoaded && 'opacity-50 cursor-not-allowed'}`}
           >
             {isVADEnabled ? <Mic size={24} /> : <MicOff size={24} />}
           </button>
         </div>
       </div>
 
-      {/* Main Experience */}
       <div className="flex-1 w-full max-w-4xl flex flex-col md:flex-row gap-12 z-10">
         
-        {/* Character Visual */}
+        {/* Interaction Area */}
         <div className="flex-1 flex flex-col items-center justify-center space-y-8 min-h-[400px]">
           <div className="relative">
             <div className={`w-48 h-48 rounded-full border-2 transition-all duration-500 flex items-center justify-center ${
@@ -168,19 +173,19 @@ export default function Home() {
           </div>
 
           <div className="text-center">
-            <h2 className="text-xl font-bold text-zinc-200">
+            <h2 className="text-xl font-bold text-zinc-200 uppercase tracking-widest">
               {pierreState === 'listening' ? 'Pierre vous écoute...' :
-               pierreState === 'thinking' ? 'Pierre réfléchit (lentement)...' :
+               pierreState === 'thinking' ? 'Pierre réfléchit...' :
                pierreState === 'speaking' ? 'Pierre répond.' :
-               pierreState === 'annoyed' ? 'Pierre est agacé.' : 'Attente de commande.'}
+               pierreState === 'annoyed' ? 'Pierre est agacé.' : 'Prêt à servir.'}
             </h2>
             <p className="text-sm text-zinc-500 italic mt-2">
-              {status === 'Connected' ? 'Connecté au serveur' : 'Service indisponible'}
+              {status === 'Connected' ? 'Connexion établie' : 'Recherche de Pierre...'}
             </p>
           </div>
         </div>
 
-        {/* Conversation Feed */}
+        {/* Chat / Transcript Area */}
         <div className="w-full md:w-[450px] bg-zinc-950/80 border border-zinc-900 rounded-3xl overflow-hidden flex flex-col shadow-2xl">
           <div className="p-4 border-b border-zinc-900 bg-zinc-900/20 flex justify-between items-center">
             <span className="text-[10px] uppercase tracking-widest font-black text-zinc-500">Dialogue</span>
@@ -194,7 +199,7 @@ export default function Home() {
             {history.length === 0 && (
               <div className="h-full flex flex-col items-center justify-center opacity-30 text-center px-8">
                 <MessageSquare size={40} className="mb-4" />
-                <p className="text-sm italic">"Allez-y, je n'ai pas toute la journée."</p>
+                <p className="text-sm italic">"Dépêchez-vous, j'ai d'autres clients."</p>
               </div>
             )}
             
@@ -206,7 +211,7 @@ export default function Home() {
                 <div className={`max-w-[90%] px-4 py-3 rounded-2xl ${
                   msg.role === 'You' 
                     ? 'bg-zinc-900 text-zinc-300 rounded-tr-none' 
-                    : 'bg-zinc-100 text-black font-medium rounded-tl-none'
+                    : 'bg-zinc-100 text-black font-medium rounded-tl-none shadow-[0_4px_12px_rgba(255,255,255,0.05)]'
                 }`}>
                   <p className="text-sm leading-relaxed">{msg.text}</p>
                 </div>
@@ -217,7 +222,7 @@ export default function Home() {
       </div>
 
       {errorMessage && (
-        <div className="fixed bottom-8 left-1/2 -translate-x-1/2 flex items-center gap-3 bg-red-950 border border-red-900 p-4 rounded-2xl text-red-400 text-sm z-50 animate-bounce">
+        <div className="fixed bottom-8 left-1/2 -translate-x-1/2 flex items-center gap-3 bg-red-950/90 border border-red-900 p-4 rounded-2xl text-red-400 text-sm z-50 animate-bounce backdrop-blur-md">
           <AlertCircle size={18} />
           <p>{errorMessage}</p>
           <button onClick={() => setErrorMessage(null)} className="ml-4 text-zinc-500 hover:text-white">&times;</button>

@@ -36,7 +36,6 @@ yarn-error.log*
 
 # TypeScript
 *.tsbuildinfo
-next-env.d.ts
 
 # IDE
 .vscode
@@ -47,8 +46,6 @@ next-env.d.ts
 
 # Logs
 logs
-*.log
-
-# OS
+*.log# OS
 .DS_Store
 Thumbs.db
