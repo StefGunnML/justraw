@@ -1,5 +1,5 @@
 export class VoiceWebSocket {
-  private ws: WebSocket | null = null;
+  private ws: any | null = null;
   private onMessageCallback: (data: any) => void;
   private onStatusCallback: (status: string) => void;
 
@@ -12,9 +12,13 @@ export class VoiceWebSocket {
   }
 
   connect() {
+    if (typeof window === 'undefined') return;
+
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.host;
-    this.ws = new WebSocket(`${protocol}//${host}/api/voice`);
+    
+    // Use window.WebSocket to be explicit and avoid any potential Node.js conflicts
+    this.ws = new (window as any).WebSocket(`${protocol}//${host}/api/voice`);
 
     this.ws.onopen = () => {
       console.log('[WS] Connected to server');
@@ -22,12 +26,11 @@ export class VoiceWebSocket {
       this.ws?.send(JSON.stringify({ type: 'start' }));
     };
 
-    this.ws.onmessage = (event) => {
+    this.ws.onmessage = (event: any) => {
       try {
         const data = JSON.parse(event.data);
         this.onMessageCallback(data);
       } catch (err) {
-        // If not JSON, it might be raw audio binary (not expected in this simplified version yet)
         console.warn('[WS] Received non-JSON message');
       }
     };
@@ -35,20 +38,18 @@ export class VoiceWebSocket {
     this.ws.onclose = () => {
       console.log('[WS] Disconnected');
       this.onStatusCallback('Disconnected');
-      // Attempt reconnect after 3 seconds
       setTimeout(() => this.connect(), 3000);
     };
 
-    this.ws.onerror = (err) => {
+    this.ws.onerror = (err: any) => {
       console.error('[WS] Error:', err);
       this.onStatusCallback('Error');
     };
   }
 
   sendAudio(audioData: Float32Array) {
-    if (this.ws?.readyState === WebSocket.OPEN) {
-      // Convert Float32Array to Int16 for efficiency if needed, or send as is
-      // For simplicity with Gemini Multimodal Live, we'll send as Buffer
+    // readyState 1 is OPEN
+    if (this.ws?.readyState === 1) {
       this.ws.send(audioData.buffer);
     }
   }
