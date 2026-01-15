@@ -50,7 +50,13 @@ export class VoiceWebSocket {
   sendAudio(audioData: Float32Array) {
     // readyState 1 is OPEN
     if (this.ws?.readyState === 1) {
-      this.ws.send(audioData.buffer);
+      // Convert Float32Array to Int16Array (PCM 16-bit)
+      const pcm16 = new Int16Array(audioData.length);
+      for (let i = 0; i < audioData.length; i++) {
+        const s = Math.max(-1, Math.min(1, audioData[i]));
+        pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+      }
+      this.ws.send(pcm16.buffer);
     }
   }
 

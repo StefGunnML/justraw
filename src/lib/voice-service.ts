@@ -55,15 +55,20 @@ export async function handleVoiceWebSocket(ws: VoiceWebSocket) {
             Memory of previous interactions:
             ${memoryContext || "None."}`;
 
-          // Initialize chat with history
+          // Initialize chat with history and system instruction
           const chat = model.startChat({
             history: [],
-            generationConfig: { responseMimeType: "application/json" }
+            systemInstruction: fullSystemPrompt,
+            generationConfig: { 
+              responseMimeType: "application/json",
+              temperature: 0.7,
+            }
           });
 
           // Store chat in the socket object
           ws.chat = chat;
-          ws.systemPrompt = fullSystemPrompt;
+          // ws.systemPrompt is no longer needed as a separate variable for sendMessage
+          ws.systemPrompt = undefined; 
 
           console.log(`[VoiceService] Requesting initial background for scenario: ${currentScenario.id}`);
           // Generate initial background
@@ -85,9 +90,8 @@ export async function handleVoiceWebSocket(ws: VoiceWebSocket) {
 
       // Handle Audio Binary Data
       const chat = ws.chat;
-      const systemPrompt = ws.systemPrompt;
       
-      if (!chat || !systemPrompt) {
+      if (!chat) {
         console.warn('[VoiceService] Received audio before start handshake');
         return;
       }
@@ -97,12 +101,12 @@ export async function handleVoiceWebSocket(ws: VoiceWebSocket) {
       const audioPart = {
         inlineData: {
           data: Buffer.isBuffer(data) ? data.toString('base64') : Buffer.from(data).toString('base64'),
-          mimeType: 'audio/pcm;rate=16000'
+          mimeType: 'audio/l16;rate=16000'
         }
       };
 
-      // Send to Gemini
-      const geminiResult = await chat.sendMessage([systemPrompt, audioPart]);
+      // Send to Gemini (without passing systemPrompt again)
+      const geminiResult = await chat.sendMessage([audioPart]);
       const responseText = geminiResult.response.text();
 
       let parsedResponse;

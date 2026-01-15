@@ -25,7 +25,7 @@ export class ImageService {
           'Authorization': `Bearer ${this.apiKey}`,
           'Content-Type': 'application/json'
         },
-        timeout: 5000 // 5s timeout for real-time feel
+        timeout: 10000 // 10s timeout for first-gen/slower models
       });
 
       // Assuming BFL returns a URL or base64 in a standard format
