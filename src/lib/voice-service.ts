@@ -27,12 +27,15 @@ export async function handleVoiceWebSocket(ws: WebSocket) {
   try {
     const userRes = await query('SELECT * FROM user_dossier WHERE user_id = $1', [userId]);
     currentRespectScore = userRes.rows[0]?.respect_score || 50;
+    console.log(`[VoiceService] User loaded. Respect Score: ${currentRespectScore}`);
     
     // Initial connection handshake
     ws.on('message', async (data: any) => {
       try {
+        console.log(`[VoiceService] Received raw data: ${typeof data === 'string' ? data : 'Buffer (' + data.length + ' bytes)'}`);
         if (data.toString().startsWith('{')) {
           const msg = JSON.parse(data.toString());
+          console.log(`[VoiceService] Parsed message type: ${msg.type}`);
           
           if (msg.type === 'start') {
             // Allow client to pick a scenario
@@ -60,12 +63,14 @@ export async function handleVoiceWebSocket(ws: WebSocket) {
             (ws as any).chat = chat;
             (ws as any).systemPrompt = fullSystemPrompt;
 
+            console.log(`[VoiceService] Requesting initial background for scenario: ${currentScenario.id}`);
             // Generate initial background
             const bgUrl = await imageService.generateBackground(
               `${currentScenario.visualBasePrompt}. Mood: ${currentScenario.initialMood}`,
               currentScenario.referenceImages
             );
 
+            console.log(`[VoiceService] Background generated: ${bgUrl ? 'success' : 'failed'}. Sending ready.`);
             ws.send(JSON.stringify({ 
               type: 'ready', 
               scenario: currentScenario,
