@@ -20,7 +20,7 @@ export async function handleVoiceWebSocket(ws: VoiceWebSocket) {
   }
   
   console.log('[VoiceService] Initializing...');
-  const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash-latest' });
+  const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
   
   const userId = '69556352-840f-45ff-9a8a-6b2a2ce074fa';
   let conversationContext = "";
