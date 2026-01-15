@@ -3,23 +3,28 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "node server.js",
     "build": "next build",
-    "start": "next start",
+    "start": "NODE_ENV=production node server.js",
     "lint": "next lint",
     "db:init": "node scripts/init-db.js",
     "db:migrate": "node scripts/init-db.js && node scripts/create-conversations-direct.js",
+    "db:vector": "node scripts/add-vector-support.js",
     "db:test": "node scripts/test-db-connection.js"
   },
   "dependencies": {
     "@google/generative-ai": "^0.21.0",
+    "@ricky0123/vad-web": "^0.0.7",
     "dotenv": "^16.4.7",
+    "express": "^4.19.2",
     "lucide-react": "^0.469.0",
     "next": "15.1.3",
+    "onnxruntime-web": "^1.19.0",
     "openai": "^4.77.0",
     "pg": "^8.13.1",
     "react": "19.0.0",
-    "react-dom": "19.0.0"
+    "react-dom": "19.0.0",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
     "@types/node": "^20.17.10",
