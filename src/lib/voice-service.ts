@@ -1,14 +1,20 @@
 import { WebSocket } from 'ws';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GoogleGenerativeAI, ChatSession } from '@google/generative-ai';
 import { query } from './db';
 import { ragEngine } from './rag-engine';
 import { SCENARIOS, Scenario } from './scenarios';
 import { imageService } from './image-service';
 
+// Extend WebSocket to include our session-specific data
+interface VoiceWebSocket extends WebSocket {
+  chat?: ChatSession;
+  systemPrompt?: string;
+}
+
 const apiKey = process.env.GEMINI_API_KEY || '';
 const genAI = apiKey ? new GoogleGenerativeAI(apiKey) : null;
 
-export async function handleVoiceWebSocket(ws: WebSocket) {
+export async function handleVoiceWebSocket(ws: VoiceWebSocket) {
   if (!genAI) {
     console.error('[VoiceService] No Gemini API key configured');
     ws.send(JSON.stringify({ type: 'error', message: 'API key missing' }));
@@ -30,12 +36,11 @@ export async function handleVoiceWebSocket(ws: WebSocket) {
     console.log(`[VoiceService] User loaded. Respect Score: ${currentRespectScore}`);
     
     // Initial connection handshake
-    ws.on('message', async (data: any) => {
+    ws.on('message', async (data: Buffer | string) => {
       try {
-        console.log(`[VoiceService] Received raw data: ${typeof data === 'string' ? data : 'Buffer (' + data.length + ' bytes)'}`);
-        if (data.toString().startsWith('{')) {
-          const msg = JSON.parse(data.toString());
-          console.log(`[VoiceService] Parsed message type: ${msg.type}`);
+        const dataString = data.toString();
+        if (dataString.startsWith('{')) {
+          const msg = JSON.parse(dataString);
           
           if (msg.type === 'start') {
             // Allow client to pick a scenario
@@ -45,7 +50,7 @@ export async function handleVoiceWebSocket(ws: WebSocket) {
             
             // Recall past memories for this user
             const memories = await ragEngine.recallMemories(userId, currentScenario.id, 5);
-            const memoryContext = memories.map(m => `- ${m.content}`).join('\n');
+            const memoryContext = memories.map((m: any) => `- ${m.content}`).join('\n');
 
             const fullSystemPrompt = `${currentScenario.systemPrompt}
               Location: ${currentScenario.location}
@@ -59,9 +64,9 @@ export async function handleVoiceWebSocket(ws: WebSocket) {
               generationConfig: { responseMimeType: "application/json" }
             });
 
-            // Store chat in the socket object or a closure
-            (ws as any).chat = chat;
-            (ws as any).systemPrompt = fullSystemPrompt;
+            // Store chat in the socket object
+            ws.chat = chat;
+            ws.systemPrompt = fullSystemPrompt;
 
             console.log(`[VoiceService] Requesting initial background for scenario: ${currentScenario.id}`);
             // Generate initial background
@@ -82,28 +87,23 @@ export async function handleVoiceWebSocket(ws: WebSocket) {
         }
 
         // Handle Audio Binary Data
-        const chat = (ws as any).chat;
-        const systemPrompt = (ws as any).systemPrompt;
+        const chat = ws.chat;
+        const systemPrompt = ws.systemPrompt;
         
-        if (!chat) return;
+        if (!chat || !systemPrompt) return;
 
         console.log(`[VoiceService] Processing audio (${data.length} bytes)`);
         
         const audioPart = {
           inlineData: {
-            data: data.toString('base64'),
+            data: Buffer.isBuffer(data) ? data.toString('base64') : Buffer.from(data).toString('base64'),
             mimeType: 'audio/pcm;rate=16000'
           }
         };
 
-        // Parallel processing: Gemini (Voice) + FLUX (Visuals)
-        const [geminiResult, newBackgroundUrl] = await Promise.all([
-          chat.sendMessage([systemPrompt, audioPart as any]),
-          // We don't generate a NEW background every single turn to save cost/latency,
-          // only if respect score changes significantly or every X turns.
-          // For now, let's just do it for major mood shifts.
-          null // placeholder
-        ]);
+        // Send to Gemini
+        const geminiResult = await chat.sendMessage([systemPrompt, audioPart]);
+        const responseText = geminiResult.response.text();
 
         let parsedResponse;
         try {

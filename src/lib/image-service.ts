@@ -17,7 +17,7 @@ export class ImageService {
         prompt: prompt,
         width: 1024,
         height: 576,
-        reference_images: referenceImages.slice(0, 4),
+        reference_images: (referenceImages || []).slice(0, 4),
         steps: 1, // Klein is optimized for speed
         output_format: "webp"
       }, {
