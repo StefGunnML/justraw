@@ -80,23 +80,26 @@ export default function Home() {
     
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      console.error('[Speech] Not supported in this browser');
-      setErrorMessage('Speech recognition not supported. Try Chrome.');
+      console.error('[Speech] Not supported');
+      setErrorMessage('Speech recognition not supported. Use Chrome.');
       return;
     }
 
+    console.log('[Speech] Initializing...');
     const recognition = new SpeechRecognition();
     recognition.continuous = false;
     recognition.interimResults = true;
     recognition.lang = 'en-US';
+    recognition.maxAlternatives = 1;
 
     recognition.onstart = () => {
-      console.log('[Speech] Started');
+      console.log('[Speech] Listening started');
       setIsListening(true);
       setPierreState('listening');
     };
 
     recognition.onresult = (event: SpeechRecognitionEvent) => {
+      console.log('[Speech] Got result');
       let finalTranscript = '';
       let interimTranscript = '';
       
@@ -111,33 +114,35 @@ export default function Home() {
       
       setTranscript(interimTranscript || finalTranscript);
       
-      if (finalTranscript) {
-        console.log('[Speech] Final:', finalTranscript);
+      if (finalTranscript && finalTranscript.trim()) {
+        console.log('[Speech] Final transcript:', finalTranscript);
+        recognition.stop(); // Force stop after final result
         setHistory(prev => [...prev, { role: 'You', text: finalTranscript }]);
         setTranscript('');
         setPierreState('thinking');
+        setIsListening(false);
         wsRef.current?.sendText(finalTranscript);
       }
     };
 
     recognition.onerror = (event: any) => {
       console.error('[Speech] Error:', event.error);
-      if (event.error !== 'no-speech') {
-        setErrorMessage(`Speech error: ${event.error}`);
-      }
       setIsListening(false);
       setPierreState('idle');
+      if (event.error === 'not-allowed') {
+        setErrorMessage('Microphone access denied. Please allow mic access.');
+      } else if (event.error !== 'no-speech' && event.error !== 'aborted') {
+        setErrorMessage(`Speech error: ${event.error}`);
+      }
     };
 
     recognition.onend = () => {
-      console.log('[Speech] Ended');
+      console.log('[Speech] Session ended');
       setIsListening(false);
-      if (pierreState === 'listening') {
-        setPierreState('idle');
-      }
     };
 
     recognitionRef.current = recognition;
+    console.log('[Speech] Ready');
   }, []);
 
   const toggleListening = () => {
@@ -147,10 +152,28 @@ export default function Home() {
     }
 
     if (isListening) {
+      console.log('[Speech] Stopping...');
       recognitionRef.current.stop();
+      setIsListening(false);
+      setPierreState('idle');
     } else {
+      console.log('[Speech] Starting...');
       setTranscript('');
-      recognitionRef.current.start();
+      try {
+        recognitionRef.current.start();
+        // Auto-timeout after 10 seconds if nothing detected
+        setTimeout(() => {
+          if (recognitionRef.current && isListening) {
+            console.log('[Speech] Timeout - stopping');
+            recognitionRef.current.stop();
+          }
+        }, 10000);
+      } catch (e: any) {
+        console.error('[Speech] Start error:', e);
+        if (e.message?.includes('already started')) {
+          recognitionRef.current.stop();
+        }
+      }
     }
   };
 
