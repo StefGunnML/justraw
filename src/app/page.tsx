@@ -1,9 +1,11 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { Mic, Loader2, Coffee, AlertCircle, MessageSquare, MicOff } from 'lucide-react';
-import { useMicVAD } from '@ricky0123/vad-web';
 import { VoiceWebSocket } from '../lib/websocket-client';
+
+// Dynamic import for VAD to avoid SSR issues
+import dynamic from 'next/dynamic';
 
 type ConversationMessage = {
   role: string;
@@ -17,10 +19,18 @@ export default function Home() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isVADEnabled, setIsVADEnabled] = useState(false);
   const [pierreState, setPierreState] = useState<'idle' | 'listening' | 'thinking' | 'speaking' | 'annoyed'>('idle');
+  const [vadLoaded, setVadLoaded] = useState(false);
   
   const wsRef = useRef<VoiceWebSocket | null>(null);
+  const vadRef = useRef<any>(null);
 
-  // 1. WebSocket Setup
+  // Load VAD dynamically on client
+  useEffect(() => {
+    import('@ricky0123/vad-web').then((mod) => {
+      vadRef.current = mod;
+      setVadLoaded(true);
+    }).catch(console.error);
+  }, []);
   useEffect(() => {
     const onMessage = (data: any) => {
       if (data.type === 'response') {
@@ -54,34 +64,38 @@ export default function Home() {
     return () => wsRef.current?.disconnect();
   }, []);
 
-  // 2. VAD Setup
-  const vad = useMicVAD({
-    startOnLoad: false,
-    onSpeechStart: () => {
-      console.log('Speech started');
-      setPierreState('listening');
-    },
-    onSpeechEnd: (audio) => {
-      console.log('Speech ended');
-      setPierreState('thinking');
-      // Send audio to server
-      if (wsRef.current) {
-        wsRef.current.sendAudio(audio);
-      }
-    },
-    onError: (err) => {
-      console.error('VAD Error:', err);
-      // setErrorMessage('Voice detection error');
-    }
-  });
+  // 2. VAD Logic
+  const [vadInstance, setVadInstance] = useState<any>(null);
 
-  const toggleVAD = () => {
+  const toggleVAD = async () => {
     if (isVADEnabled) {
-      vad.pause();
+      if (vadInstance) vadInstance.pause();
       setIsVADEnabled(false);
       setPierreState('idle');
     } else {
-      vad.start();
+      if (!vadInstance && vadRef.current) {
+        try {
+          const myVad = await vadRef.current.MicVAD.new({
+            onSpeechStart: () => {
+              console.log('Speech started');
+              setPierreState('listening');
+            },
+            onSpeechEnd: (audio: any) => {
+              console.log('Speech ended');
+              setPierreState('thinking');
+              if (wsRef.current) wsRef.current.sendAudio(audio);
+            },
+          });
+          myVad.start();
+          setVadInstance(myVad);
+        } catch (err) {
+          console.error('VAD init error:', err);
+          setErrorMessage('Could not start voice detection.');
+          return;
+        }
+      } else if (vadInstance) {
+        vadInstance.start();
+      }
       setIsVADEnabled(true);
     }
   };
