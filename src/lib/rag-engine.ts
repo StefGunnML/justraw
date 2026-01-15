@@ -17,10 +17,11 @@ export class RAGEngine {
       
       const result = await this.model.embedContent(content);
       const embedding = result.embedding.values;
+      const vectorString = `[${embedding.join(',')}]`;
 
       await query(
         'INSERT INTO knowledge_base (user_id, content, embedding, metadata) VALUES ($1, $2, $3, $4)',
-        [userId, content, JSON.stringify(embedding), JSON.stringify(metadata)]
+        [userId, content, vectorString, JSON.stringify(metadata)]
       );
       
       console.log('[RAG] Memory saved successfully');
@@ -39,6 +40,7 @@ export class RAGEngine {
       
       const result = await this.model.embedContent(searchText);
       const embedding = result.embedding.values;
+      const vectorString = `[${embedding.join(',')}]`;
 
       // Perform vector similarity search
       const res = await query(
@@ -47,7 +49,7 @@ export class RAGEngine {
          WHERE user_id = $1 
          ORDER BY embedding <=> $2 
          LIMIT $3`,
-        [userId, JSON.stringify(embedding), limit]
+        [userId, vectorString, limit]
       );
 
       return res.rows;
