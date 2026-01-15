@@ -2,7 +2,7 @@ import axios from 'axios';
 
 export class ImageService {
   private apiKey: string | undefined = process.env.BFL_API_KEY;
-  private baseUrl: string = "https://api.bfl.ml/v1"; // Placeholder, assuming BFL standard
+  private baseUrl: string = "https://api.bfl.ai/v1";
 
   async generateBackground(prompt: string, referenceImages: string[] = []): Promise<string> {
     if (!this.apiKey) {
@@ -11,50 +11,70 @@ export class ImageService {
     }
 
     try {
-      console.log(`[ImageService] Generating reactive background for: "${prompt.substring(0, 50)}..."`);
+      console.log(`[ImageService] Generating background: "${prompt.substring(0, 50)}..."`);
       
-      const response = await axios.post(`${this.baseUrl}/flux-2-klein-4b`, {
+      // Step 1: Submit generation request
+      const payload: any = {
         prompt: prompt,
         width: 1024,
         height: 576,
-        reference_images: (referenceImages || []).slice(0, 4),
-        steps: 1, // Klein is optimized for speed
-        output_format: "webp"
-      }, {
+        output_format: "jpeg"
+      };
+      
+      // Add reference images if provided (max 4)
+      if (referenceImages && referenceImages.length > 0) {
+        referenceImages.slice(0, 4).forEach((img, i) => {
+          payload[i === 0 ? 'input_image' : `input_image_${i + 1}`] = img;
+        });
+      }
+      
+      const submitResponse = await axios.post(`${this.baseUrl}/flux-2-klein-9b`, payload, {
         headers: {
-          'Authorization': `Bearer ${this.apiKey}`,
+          'accept': 'application/json',
+          'x-key': this.apiKey,
           'Content-Type': 'application/json'
         },
-        timeout: 10000 // 10s timeout for first-gen/slower models
+        timeout: 5000
       });
 
-      // Assuming BFL returns a URL or base64 in a standard format
-      return response.data.image_url || response.data.images?.[0]?.url || "";
-    } catch (err) {
-      console.error('[ImageService] BFL Generation failed:', err);
+      const pollingUrl = submitResponse.data.polling_url;
+      console.log(`[ImageService] Task submitted, polling...`);
+      
+      // Step 2: Poll for results (max 20 attempts = 10 seconds)
+      for (let i = 0; i < 20; i++) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        const pollResponse = await axios.get(pollingUrl, {
+          headers: {
+            'accept': 'application/json',
+            'x-key': this.apiKey
+          },
+          timeout: 5000
+        });
+        
+        if (pollResponse.data.status === 'Ready') {
+          const imageUrl = pollResponse.data.result.sample;
+          console.log(`[ImageService] ✅ Image generated (${i + 1} polls)`);
+          return imageUrl;
+        } else if (pollResponse.data.status === 'Error') {
+          console.error('[ImageService] Generation error:', pollResponse.data.error);
+          return "";
+        }
+      }
+      
+      console.warn('[ImageService] Polling timeout');
+      return "";
+      
+    } catch (err: any) {
+      console.error('[ImageService] BFL failed:', err.message);
       return "";
     }
   }
 
   async editImage(baseImage: string, instruction: string): Promise<string> {
-    if (!this.apiKey) return "";
-
-    try {
-      const response = await axios.post(`${this.baseUrl}/flux-2-klein-edit`, {
-        image: baseImage,
-        prompt: instruction,
-        output_format: "webp"
-      }, {
-        headers: {
-          'Authorization': `Bearer ${this.apiKey}`
-        }
-      });
-
-      return response.data.image_url || "";
-    } catch (err) {
-      console.error('[ImageService] BFL Edit failed:', err);
-      return "";
-    }
+    // Image editing not yet supported by FLUX.2 klein
+    console.warn('[ImageService] Image editing not implemented for FLUX.2 klein');
+    return "";
   }
 }
 
