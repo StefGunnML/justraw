@@ -87,7 +87,7 @@ export default function Home() {
 
     console.log('[Speech] Initializing...');
     const recognition = new SpeechRecognition();
-    recognition.continuous = false;
+    recognition.continuous = true; // Keep listening until manually stopped
     recognition.interimResults = true;
     recognition.lang = 'en-US';
     recognition.maxAlternatives = 1;
@@ -157,6 +157,8 @@ export default function Home() {
     recognition.onend = () => {
       console.log('[Speech] Session ended');
       setIsListening(false);
+      // Only reset to idle if we're not already thinking/speaking
+      setPierreState((current) => current === 'listening' ? 'idle' : current);
     };
 
     recognitionRef.current = recognition;
