@@ -1,25 +1,13 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { Mic, Loader2, Coffee, AlertCircle, MessageSquare, MicOff, Shield, User, Globe } from 'lucide-react';
+import { Mic, Loader2, Coffee, AlertCircle, MessageSquare, MicOff, Shield, User, Globe, Send } from 'lucide-react';
 import { VoiceWebSocket } from '../lib/websocket-client';
 
 type ConversationMessage = {
   role: string;
   text: string;
 };
-
-// Type for Web Speech API
-interface SpeechRecognitionEvent {
-  results: {
-    [index: number]: {
-      [index: number]: {
-        transcript: string;
-      };
-      isFinal: boolean;
-    };
-  };
-}
 
 export default function Home() {
   const [status, setStatus] = useState('Initializing...');
@@ -30,9 +18,24 @@ export default function Home() {
   const [pierreState, setPierreState] = useState<'idle' | 'listening' | 'thinking' | 'speaking' | 'annoyed'>('idle');
   const [currentScenario, setCurrentScenario] = useState<any>(null);
   const [transcript, setTranscript] = useState('');
+  const [textInput, setTextInput] = useState('');
+  const [speechSupported, setSpeechSupported] = useState(true);
   
   const wsRef = useRef<VoiceWebSocket | null>(null);
   const recognitionRef = useRef<any>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Send message to Pierre
+  const sendMessage = (text: string) => {
+    if (!text.trim()) return;
+    
+    console.log('[App] Sending message:', text);
+    setHistory(prev => [...prev, { role: 'You', text: text.trim() }]);
+    wsRef.current?.sendText(text.trim());
+    setPierreState('thinking');
+    setTranscript('');
+    setTextInput('');
+  };
 
   // Initialize WebSocket
   useEffect(() => {
@@ -54,6 +57,7 @@ export default function Home() {
       }
       
       if (data.type === 'error') {
+        console.error('[WS] Error:', data.message);
         setErrorMessage(data.message);
         setPierreState('annoyed');
         setTimeout(() => setPierreState('idle'), 2000);
@@ -80,85 +84,82 @@ export default function Home() {
     
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      console.error('[Speech] Not supported');
-      setErrorMessage('Speech recognition not supported. Use Chrome.');
+      console.warn('[Speech] Not supported in this browser');
+      setSpeechSupported(false);
       return;
     }
 
     console.log('[Speech] Initializing...');
     const recognition = new SpeechRecognition();
-    recognition.continuous = true; // Keep listening until manually stopped
+    recognition.continuous = true;
     recognition.interimResults = true;
     recognition.lang = 'en-US';
     recognition.maxAlternatives = 1;
 
+    let silenceTimeout: ReturnType<typeof setTimeout> | null = null;
+    let currentTranscript = '';
+
     recognition.onstart = () => {
-      console.log('[Speech] Listening started');
+      console.log('[Speech] Started');
       setIsListening(true);
       setPierreState('listening');
+      currentTranscript = '';
     };
-
-    let speechTimeout: NodeJS.Timeout | null = null;
     
-    recognition.onresult = (event: SpeechRecognitionEvent) => {
-      console.log('[Speech] Got result');
-      let finalTranscript = '';
-      let interimTranscript = '';
+    recognition.onresult = (event: any) => {
+      let interim = '';
+      let final = '';
       
-      for (let i = 0; i < Object.keys(event.results).length; i++) {
-        const result = event.results[i];
-        if (result.isFinal) {
-          finalTranscript += result[0].transcript;
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const t = event.results[i][0].transcript;
+        if (event.results[i].isFinal) {
+          final += t;
         } else {
-          interimTranscript += result[0].transcript;
+          interim += t;
         }
       }
       
-      setTranscript(interimTranscript || finalTranscript);
+      currentTranscript = final || interim;
+      setTranscript(currentTranscript);
+      console.log('[Speech] Transcript:', currentTranscript);
       
-      // Auto-send after 2 seconds of silence
-      if (speechTimeout) clearTimeout(speechTimeout);
-      speechTimeout = setTimeout(() => {
-        const currentText = interimTranscript || finalTranscript;
-        if (currentText.trim()) {
-          console.log('[Speech] Auto-sending after pause:', currentText);
+      // Reset silence timeout
+      if (silenceTimeout) clearTimeout(silenceTimeout);
+      silenceTimeout = setTimeout(() => {
+        if (currentTranscript.trim()) {
+          console.log('[Speech] Auto-sending after silence');
           recognition.stop();
-          setHistory(prev => [...prev, { role: 'You', text: currentText }]);
-          setTranscript('');
-          setPierreState('thinking');
-          setIsListening(false);
-          wsRef.current?.sendText(currentText);
+          sendMessage(currentTranscript);
         }
-      }, 2000);
-      
-      if (finalTranscript && finalTranscript.trim()) {
-        console.log('[Speech] Final transcript:', finalTranscript);
-        if (speechTimeout) clearTimeout(speechTimeout);
-        recognition.stop();
-        setHistory(prev => [...prev, { role: 'You', text: finalTranscript }]);
-        setTranscript('');
-        setPierreState('thinking');
-        setIsListening(false);
-        wsRef.current?.sendText(finalTranscript);
-      }
+      }, 1500); // 1.5 seconds of silence
     };
 
     recognition.onerror = (event: any) => {
       console.error('[Speech] Error:', event.error);
       setIsListening(false);
-      setPierreState('idle');
+      
       if (event.error === 'not-allowed') {
-        setErrorMessage('Microphone access denied. Please allow mic access.');
-      } else if (event.error !== 'no-speech' && event.error !== 'aborted') {
-        setErrorMessage(`Speech error: ${event.error}`);
+        setErrorMessage('Microphone access denied. Use the text input below.');
+        setSpeechSupported(false);
+      } else if (event.error === 'no-speech') {
+        // No speech detected - just quietly end
+        setPierreState('idle');
+      } else if (event.error !== 'aborted') {
+        console.warn('[Speech] Error:', event.error);
       }
     };
 
     recognition.onend = () => {
-      console.log('[Speech] Session ended');
+      console.log('[Speech] Ended');
       setIsListening(false);
-      // Only reset to idle if we're not already thinking/speaking
-      setPierreState((current) => current === 'listening' ? 'idle' : current);
+      if (silenceTimeout) clearTimeout(silenceTimeout);
+      
+      // If we have unsent transcript, send it
+      if (currentTranscript.trim() && pierreState === 'listening') {
+        sendMessage(currentTranscript);
+      } else {
+        setPierreState(current => current === 'listening' ? 'idle' : current);
+      }
     };
 
     recognitionRef.current = recognition;
@@ -167,23 +168,13 @@ export default function Home() {
 
   const toggleListening = () => {
     if (!recognitionRef.current) {
-      setErrorMessage('Speech recognition not available');
+      setErrorMessage('Speech not available. Use the text input.');
       return;
     }
 
     if (isListening) {
-      console.log('[Speech] Manual stop - sending current text');
-      // Send whatever we have so far
-      if (transcript.trim()) {
-        setHistory(prev => [...prev, { role: 'You', text: transcript }]);
-        wsRef.current?.sendText(transcript);
-        setPierreState('thinking');
-        setTranscript('');
-      } else {
-        setPierreState('idle');
-      }
+      console.log('[Speech] Manual stop');
       recognitionRef.current.stop();
-      setIsListening(false);
     } else {
       console.log('[Speech] Starting...');
       setTranscript('');
@@ -191,12 +182,23 @@ export default function Home() {
       try {
         recognitionRef.current.start();
       } catch (e: any) {
-        console.error('[Speech] Start error:', e);
+        console.error('[Speech] Start error:', e.message);
         if (e.message?.includes('already started')) {
           recognitionRef.current.stop();
-          setTimeout(() => recognitionRef.current?.start(), 100);
+          setTimeout(() => {
+            try { recognitionRef.current?.start(); } catch {}
+          }, 100);
+        } else {
+          setErrorMessage('Could not start microphone. Use text input.');
         }
       }
+    }
+  };
+
+  const handleTextSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (textInput.trim() && status === 'Connected') {
+      sendMessage(textInput);
     }
   };
 
@@ -239,20 +241,19 @@ export default function Home() {
             </div>
           </div>
           
-          <button 
-            onClick={toggleListening}
-            disabled={status !== 'Connected'}
-            className={`group relative p-5 rounded-xl border transition-all active:scale-95 ${
-              isListening 
-                ? 'bg-red-600 border-red-500 text-white shadow-[0_0_30px_rgba(220,38,38,0.4)] animate-pulse' 
-                : 'bg-zinc-900 border-white/5 text-zinc-500 hover:border-white/20'
-            } ${status !== 'Connected' && 'opacity-30 cursor-not-allowed'}`}
-          >
-            {isListening ? <Mic size={28} /> : <MicOff size={28} />}
-            <span className="absolute -bottom-8 left-1/2 -translate-x-1/2 text-[8px] uppercase tracking-widest font-black whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity">
-              {isListening ? 'Listening...' : 'Click to Speak'}
-            </span>
-          </button>
+          {speechSupported && (
+            <button 
+              onClick={toggleListening}
+              disabled={status !== 'Connected' || pierreState === 'thinking'}
+              className={`group relative p-5 rounded-xl border transition-all active:scale-95 ${
+                isListening 
+                  ? 'bg-red-600 border-red-500 text-white shadow-[0_0_30px_rgba(220,38,38,0.4)] animate-pulse' 
+                  : 'bg-zinc-900 border-white/5 text-zinc-500 hover:border-white/20'
+              } ${(status !== 'Connected' || pierreState === 'thinking') && 'opacity-30 cursor-not-allowed'}`}
+            >
+              {isListening ? <Mic size={28} /> : <MicOff size={28} />}
+            </button>
+          )}
         </div>
       </div>
 
@@ -282,15 +283,11 @@ export default function Home() {
               {pierreState === 'listening' ? 'Listening...' :
                pierreState === 'thinking' ? 'Pierre is thinking...' :
                pierreState === 'speaking' ? `${currentScenario?.character || 'Pierre'} responds` :
-               pierreState === 'annoyed' ? 'Hmph!' : 'Click mic to speak'}
+               pierreState === 'annoyed' ? 'Hmph!' : 'Talk to Pierre'}
             </h2>
             
             {transcript && (
               <p className="text-lg text-zinc-400 italic">"{transcript}"</p>
-            )}
-            
-            {pierreState === 'listening' && (
-              <p className="text-xs text-zinc-500 animate-pulse">Click mic again to send</p>
             )}
             
             <div className="flex justify-center gap-4 text-[10px] uppercase tracking-widest font-bold text-zinc-500">
@@ -309,11 +306,11 @@ export default function Home() {
             </div>
           </div>
           
-          <div className="flex-1 overflow-y-auto p-8 space-y-8 scrollbar-hide max-h-[500px]">
+          <div className="flex-1 overflow-y-auto p-8 space-y-8 scrollbar-hide max-h-[400px]">
             {history.length === 0 && (
               <div className="h-full flex flex-col items-center justify-center opacity-20 text-center px-8 py-20">
                 <MessageSquare size={48} className="mb-6" />
-                <p className="text-sm italic font-serif">"Click the microphone and speak to Pierre"</p>
+                <p className="text-sm italic font-serif">"Type below or use the microphone"</p>
               </div>
             )}
             
@@ -332,6 +329,28 @@ export default function Home() {
               </div>
             ))}
           </div>
+
+          {/* Text Input */}
+          <form onSubmit={handleTextSubmit} className="p-4 border-t border-white/5 bg-black/20">
+            <div className="flex gap-3">
+              <input
+                ref={inputRef}
+                type="text"
+                value={textInput}
+                onChange={(e) => setTextInput(e.target.value)}
+                placeholder="Type to Pierre..."
+                disabled={status !== 'Connected' || pierreState === 'thinking'}
+                className="flex-1 bg-zinc-900 border border-white/10 rounded-lg px-4 py-3 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-white/30 disabled:opacity-50"
+              />
+              <button
+                type="submit"
+                disabled={!textInput.trim() || status !== 'Connected' || pierreState === 'thinking'}
+                className="bg-white text-black px-4 py-3 rounded-lg font-bold hover:bg-zinc-200 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                <Send size={18} />
+              </button>
+            </div>
+          </form>
         </div>
       </div>
 
