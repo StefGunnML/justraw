@@ -42,9 +42,7 @@ yarn-error.log*
 .idea
 *.swp
 *.swo
-*~
-
-# Logs
+*~# Logs
 logs
 *.log# OS
 .DS_Store
