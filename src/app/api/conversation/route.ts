@@ -44,7 +44,7 @@ Mood: ${userState.respect_score > 60 ? 'Polite' : 'Impatient'}
 Rules: Speak French, be brief, ${userState.respect_score > 80 ? 'use vous' : 'use tu'}`;
 
         const genAI = new GoogleGenerativeAI(geminiApiKey);
-        const model = genAI.getGenerativeModel({ model: 'gemini-1.0-pro' });
+        const model = genAI.getGenerativeModel({ model: 'gemini-1.5-pro' });
 
         const audioBytes = await audioFile.arrayBuffer();
         const audioBase64 = Buffer.from(audioBytes).toString('base64');
