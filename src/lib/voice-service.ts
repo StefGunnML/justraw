@@ -19,7 +19,7 @@ export async function handleVoiceWebSocket(ws: VoiceWebSocket) {
     return;
   }
   
-  console.log('[VoiceService] Initializing...');
+  console.log('[VoiceService] Initializing with gemini-1.5-flash...');
   const model = genAI.getGenerativeModel({ model: 'models/gemini-1.5-flash' });
   
   const userId = '69556352-840f-45ff-9a8a-6b2a2ce074fa';
@@ -81,10 +81,11 @@ export async function handleVoiceWebSocket(ws: VoiceWebSocket) {
 
         const userText = msg.text;
         console.log(`[VoiceService] User said: "${userText}"`);
+        console.log('[VoiceService] Sending to Gemini...');
         
         const geminiResult = await chat.sendMessage(userText);
         const responseText = geminiResult.response.text();
-        console.log('[VoiceService] Gemini responded');
+        console.log('[VoiceService] Gemini response:', responseText.substring(0, 100));
 
         let parsedResponse;
         try {
@@ -108,8 +109,9 @@ export async function handleVoiceWebSocket(ws: VoiceWebSocket) {
       }
 
     } catch (err: any) {
-      console.error('[VoiceService] Error:', err.message || err);
-      ws.send(JSON.stringify({ type: 'error', message: 'Processing failed.' }));
+      const errorMsg = err.message || String(err);
+      console.error('[VoiceService] Error:', errorMsg);
+      ws.send(JSON.stringify({ type: 'error', message: errorMsg.substring(0, 200) }));
     } finally {
       isProcessing = false;
     }
