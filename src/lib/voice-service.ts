@@ -19,8 +19,8 @@ export async function handleVoiceWebSocket(ws: VoiceWebSocket) {
     return;
   }
   
-  console.log('[VoiceService] Initializing with gemini-1.5-flash...');
-  const model = genAI.getGenerativeModel({ model: 'models/gemini-1.5-flash' });
+  console.log('[VoiceService] Initializing with gemini-1.5-flash-latest...');
+  const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash-latest' });
   
   const userId = '69556352-840f-45ff-9a8a-6b2a2ce074fa';
   let conversationContext = "";

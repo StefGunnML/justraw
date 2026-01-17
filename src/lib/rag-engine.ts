@@ -67,7 +67,7 @@ export class RAGEngine {
         console.warn('[RAG] Skipping summarizeAndStore: GEMINI_API_KEY is not set.');
         return;
       }
-      const summaryModel = genAI.getGenerativeModel({ model: 'models/gemini-1.5-flash' });
+      const summaryModel = genAI.getGenerativeModel({ model: 'gemini-1.5-flash-latest' });
       const prompt = `Summarize the key facts about this user and their interaction in 1-2 sentences for long-term memory: \n\n${conversationHistory}`;
       
       const result = await summaryModel.generateContent(prompt);
