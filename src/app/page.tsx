@@ -54,10 +54,18 @@ export default function Home() {
       if (data.type === 'response') {
         if (data.text) {
           setHistory(prev => [...prev, { role: data.character || 'AI', text: data.text }]);
+          // Speak Pierre's response
+          if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+            const utterance = new SpeechSynthesisUtterance(data.text);
+            utterance.lang = 'fr-FR';
+            utterance.rate = 0.9;
+            utterance.pitch = 0.9;
+            utterance.onend = () => setPierreState('idle');
+            window.speechSynthesis.speak(utterance);
+          }
         }
         setRespectScore(data.respectScore || 50);
         setPierreState('speaking');
-        setTimeout(() => setPierreState('idle'), 2000);
       }
       
       if (data.type === 'error') {
