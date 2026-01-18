@@ -1,6 +1,6 @@
 import { WebSocket } from 'ws';
 import { GoogleGenerativeAI, ChatSession } from '@google/generative-ai';
-import { OpenAI } from 'openai';
+import axios from 'axios';
 import { query } from './db';
 import { ragEngine } from './rag-engine';
 import { SCENARIOS, Scenario } from './scenarios';
@@ -13,25 +13,39 @@ interface VoiceWebSocket extends WebSocket {
 const apiKey = process.env.GEMINI_API_KEY || '';
 const genAI = apiKey ? new GoogleGenerativeAI(apiKey) : null;
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY || '',
-});
-
 async function generateTTS(text: string, character: string): Promise<string> {
-  if (!process.env.OPENAI_API_KEY) return "";
+  if (!apiKey) return "";
   
   try {
-    const voice = character === 'Pierre' ? 'alloy' : 'onyx'; // Alloy for Pierre (neutral/fast), Onyx for Petrov (deep)
-    const mp3 = await openai.audio.speech.create({
-      model: "tts-1",
-      voice: voice,
-      input: text,
-    });
+    // Neural2 voices are very high quality
+    // Pierre: Neural2-B (Male, Parisian style)
+    // Petrov: Neural2-D (Male, deeper)
+    const voiceName = character === 'Pierre' ? 'fr-FR-Neural2-B' : 'fr-FR-Neural2-D';
+    
+    console.log(`[TTS] Generating Google Cloud speech for: ${character} using ${voiceName}`);
+    
+    const response = await axios.post(
+      `https://texttospeech.googleapis.com/v1/text:synthesize?key=${apiKey}`,
+      {
+        input: { text },
+        voice: { 
+          languageCode: 'fr-FR', 
+          name: voiceName 
+        },
+        audioConfig: { 
+          audioEncoding: 'MP3',
+          pitch: character === 'Pierre' ? -2.0 : -4.0, // Pierre is grumpy, Petrov is deep
+          speakingRate: character === 'Pierre' ? 1.05 : 0.85 // Pierre is impatient, Petrov is slow
+        }
+      },
+      {
+        headers: { 'Content-Type': 'application/json' }
+      }
+    );
 
-    const buffer = Buffer.from(await mp3.arrayBuffer());
-    return buffer.toString('base64');
-  } catch (err) {
-    console.error('[TTS] OpenAI failed:', err);
+    return response.data.audioContent || "";
+  } catch (err: any) {
+    console.error('[TTS] Google Cloud failed:', err.response?.data || err.message);
     return "";
   }
 }
