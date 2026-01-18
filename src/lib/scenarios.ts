@@ -29,7 +29,7 @@ Rules:
 - Use casual French (tu/vous).
 - Be extremely brief and direct.
 - Your respect score for the user changes based on their politeness.
-- Respond with a JSON object: {"text": "your response", "respectDelta": number}`,
+- Respond with a JSON object: {"text": "your response", "translation": "english translation", "respectDelta": number, "hints": ["3 short french suggestions for user response"]}`,
     visualBasePrompt: "A classic Parisian café interior, moody lighting, cinematic film grain, 1970s aesthetic. Pierre is a thin man in a white apron and black vest.",
   },
   'border-crossing': {
@@ -47,7 +47,7 @@ Rules:
 - Speak ONLY dialogue.
 - Be cold, bureaucratic, and intimidating.
 - Respect Score represents your trust level.
-- Respond with a JSON object: {"text": "your response", "respectDelta": number}`,
+- Respond with a JSON object: {"text": "your response", "translation": "english translation", "respectDelta": number, "hints": ["3 short french suggestions for user response"]}`,
     visualBasePrompt: "A bleak, concrete border checkpoint, rainy night, harsh fluorescent lighting, industrial atmosphere.",
   }
 };

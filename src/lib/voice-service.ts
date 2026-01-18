@@ -3,6 +3,7 @@ import { GoogleGenerativeAI, ChatSession } from '@google/generative-ai';
 import { query } from './db';
 import { ragEngine } from './rag-engine';
 import { SCENARIOS, Scenario } from './scenarios';
+import { imageService } from './image-service';
 
 interface VoiceWebSocket extends WebSocket {
   chat?: ChatSession;
@@ -62,7 +63,6 @@ export async function handleVoiceWebSocket(ws: VoiceWebSocket) {
         ws.chat = chat;
         
         console.log(`[VoiceService] Generating initial greeting for: ${currentScenario.id}`);
-        // Ask Gemini to start the conversation
         const initialGreeting = await chat.sendMessage("Initiate the conversation as your character.");
         const initialText = initialGreeting.response.text();
         
@@ -72,20 +72,33 @@ export async function handleVoiceWebSocket(ws: VoiceWebSocket) {
           parsedInitial = JSON.parse(cleanText);
         } catch (e) {
           console.error('[VoiceService] Failed to parse initial greeting:', initialText);
-          parsedInitial = { text: currentScenario.id === 'paris-cafe' ? "Bonjour. Qu'est-ce que vous voulez?" : "Vos papiers, s'il vous plaît.", respectDelta: 0 };
+          parsedInitial = { 
+            text: currentScenario.id === 'paris-cafe' ? "Bonjour. Qu'est-ce que vous voulez?" : "Vos papiers, s'il vous plaît.", 
+            translation: "Hello. What do you want?",
+            hints: ["Un café, s'il vous plaît", "Rien pour l'instant", "Vous êtes très impoli"],
+            respectDelta: 0 
+          };
         }
+
+        // Generate initial background
+        const moodDesc = currentRespectScore < 40 ? "unwelcoming and dark" : "bright and cinematic";
+        const bgUrl = await imageService.generateBackground(
+          `${currentScenario.visualBasePrompt}. Mood: ${moodDesc}`
+        );
 
         console.log(`[VoiceService] Ready: ${currentScenario.id}`);
         ws.send(JSON.stringify({ 
           type: 'ready', 
           scenario: currentScenario, 
           respectScore: currentRespectScore,
-          initialGreeting: parsedInitial.text
+          initialGreeting: parsedInitial.text,
+          translation: parsedInitial.translation,
+          hints: parsedInitial.hints,
+          imageUrl: bgUrl
         }));
         return;
       }
       
-      // Handle transcribed text from client
       if (msg.type === 'text') {
         const chat = ws.chat;
         if (!chat) {
@@ -107,19 +120,32 @@ export async function handleVoiceWebSocket(ws: VoiceWebSocket) {
           const cleanText = responseText.replace(/```json|```/g, '').trim();
           parsedResponse = JSON.parse(cleanText);
         } catch (e) {
-          parsedResponse = { text: responseText, respectDelta: 0 };
+          parsedResponse = { text: responseText, translation: "", hints: [], respectDelta: 0 };
         }
 
+        const oldScore = currentRespectScore;
         currentRespectScore = Math.max(0, Math.min(100, currentRespectScore + (parsedResponse.respectDelta || 0)));
         await query('UPDATE user_dossier SET respect_score = $1, last_interaction = NOW() WHERE user_id = $2', [currentRespectScore, userId]);
         
         conversationContext += `User: ${userText}\n${currentScenario.character}: ${parsedResponse.text}\n`;
 
+        // Generate new background if respect changed significantly
+        let newBgUrl = undefined;
+        if (Math.abs(currentRespectScore - oldScore) > 10) {
+          const moodDesc = currentRespectScore < 40 ? "very dark and hostile" : currentRespectScore > 70 ? "welcoming and cinematic" : "neutral";
+          newBgUrl = await imageService.generateBackground(
+            `${currentScenario.visualBasePrompt}. The atmosphere is now ${moodDesc}.`
+          );
+        }
+
         ws.send(JSON.stringify({
           type: 'response',
           text: parsedResponse.text,
+          translation: parsedResponse.translation,
+          hints: parsedResponse.hints,
           character: currentScenario.character,
-          respectScore: currentRespectScore
+          respectScore: currentRespectScore,
+          imageUrl: newBgUrl
         }));
       }
 
