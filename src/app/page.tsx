@@ -27,9 +27,13 @@ export default function Home() {
 
   // Send message to Pierre
   const sendMessage = (text: string) => {
-    if (!text.trim()) return;
+    if (!text.trim()) {
+      console.log('[App] Empty text, not sending');
+      return;
+    }
     
     console.log('[App] Sending message:', text);
+    console.log('[App] WebSocket ref:', wsRef.current ? 'exists' : 'null');
     setHistory(prev => [...prev, { role: 'You', text: text.trim() }]);
     wsRef.current?.sendText(text.trim());
     setPierreState('thinking');
@@ -197,8 +201,12 @@ export default function Home() {
 
   const handleTextSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    console.log('[Form] Submit clicked, text:', textInput, 'status:', status);
     if (textInput.trim() && status === 'Connected') {
+      console.log('[Form] Sending...');
       sendMessage(textInput);
+    } else {
+      console.log('[Form] Not sending - empty text or not connected');
     }
   };
 
