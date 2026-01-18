@@ -54,14 +54,29 @@ export default function Home() {
       if (data.type === 'response') {
         if (data.text) {
           setHistory(prev => [...prev, { role: data.character || 'AI', text: data.text }]);
-          // Speak Pierre's response
+          // Speak Pierre's response with TTS
           if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-            const utterance = new SpeechSynthesisUtterance(data.text);
-            utterance.lang = 'fr-FR';
-            utterance.rate = 0.9;
-            utterance.pitch = 0.9;
-            utterance.onend = () => setPierreState('idle');
-            window.speechSynthesis.speak(utterance);
+            console.log('[TTS] Speaking:', data.text.substring(0, 50));
+            // Cancel any ongoing speech
+            window.speechSynthesis.cancel();
+            
+            // Small delay to ensure voices are loaded
+            setTimeout(() => {
+              const utterance = new SpeechSynthesisUtterance(data.text);
+              utterance.lang = 'fr-FR';
+              utterance.rate = 0.9;
+              utterance.pitch = 0.9;
+              utterance.volume = 1.0;
+              utterance.onstart = () => console.log('[TTS] Started speaking');
+              utterance.onend = () => {
+                console.log('[TTS] Finished speaking');
+                setPierreState('idle');
+              };
+              utterance.onerror = (e) => console.error('[TTS] Error:', e);
+              window.speechSynthesis.speak(utterance);
+            }, 100);
+          } else {
+            console.log('[TTS] Not supported');
           }
         }
         setRespectScore(data.respectScore || 50);
@@ -105,7 +120,7 @@ export default function Home() {
     const recognition = new SpeechRecognition();
     recognition.continuous = true;
     recognition.interimResults = true;
-    recognition.lang = 'en-US';
+    recognition.lang = 'fr-FR'; // French language for speech recognition
     recognition.maxAlternatives = 1;
 
     let silenceTimeout: ReturnType<typeof setTimeout> | null = null;
