@@ -48,16 +48,19 @@ export default function Home() {
     setHints([]);
   };
 
-  const speakText = (text: string) => {
+  const speakText = (base64Audio: string) => {
+    if (!base64Audio) return;
+    
+    console.log('[TTS] Playing OpenAI audio');
+    // Cancel any ongoing speech if using browser TTS (not needed for this path but good practice)
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = 'fr-FR';
-      utterance.rate = 0.9;
-      utterance.pitch = 0.9;
-      utterance.onend = () => setPierreState('idle');
-      window.speechSynthesis.speak(utterance);
     }
+
+    const audio = new Audio(`data:audio/mp3;base64,${base64Audio}`);
+    audio.onplay = () => setPierreState('speaking');
+    audio.onended = () => setPierreState('idle');
+    audio.play().catch(e => console.error('[TTS] Playback failed:', e));
   };
 
   // Initialize WebSocket
@@ -78,8 +81,7 @@ export default function Home() {
             translation: data.translation 
           }]);
           setHints(data.hints || []);
-          setPierreState('speaking');
-          speakText(data.initialGreeting);
+          if (data.audio) speakText(data.audio);
         }
       }
 
@@ -91,8 +93,7 @@ export default function Home() {
             translation: data.translation
           }]);
           setHints(data.hints || []);
-          setPierreState('speaking');
-          speakText(data.text);
+          if (data.audio) speakText(data.audio);
         }
         if (data.imageUrl) setBackgroundUrl(data.imageUrl);
         setRespectScore(data.respectScore || 50);

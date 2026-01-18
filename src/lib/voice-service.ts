@@ -1,5 +1,6 @@
 import { WebSocket } from 'ws';
 import { GoogleGenerativeAI, ChatSession } from '@google/generative-ai';
+import { OpenAI } from 'openai';
 import { query } from './db';
 import { ragEngine } from './rag-engine';
 import { SCENARIOS, Scenario } from './scenarios';
@@ -11,6 +12,29 @@ interface VoiceWebSocket extends WebSocket {
 
 const apiKey = process.env.GEMINI_API_KEY || '';
 const genAI = apiKey ? new GoogleGenerativeAI(apiKey) : null;
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY || '',
+});
+
+async function generateTTS(text: string, character: string): Promise<string> {
+  if (!process.env.OPENAI_API_KEY) return "";
+  
+  try {
+    const voice = character === 'Pierre' ? 'alloy' : 'onyx'; // Alloy for Pierre (neutral/fast), Onyx for Petrov (deep)
+    const mp3 = await openai.audio.speech.create({
+      model: "tts-1",
+      voice: voice,
+      input: text,
+    });
+
+    const buffer = Buffer.from(await mp3.arrayBuffer());
+    return buffer.toString('base64');
+  } catch (err) {
+    console.error('[TTS] OpenAI failed:', err);
+    return "";
+  }
+}
 
 export async function handleVoiceWebSocket(ws: VoiceWebSocket) {
   if (!genAI) {
@@ -86,6 +110,9 @@ export async function handleVoiceWebSocket(ws: VoiceWebSocket) {
           `${currentScenario.visualBasePrompt}. Mood: ${moodDesc}`
         );
 
+        // Generate initial speech
+        const audioBase64 = await generateTTS(parsedInitial.text, currentScenario.character);
+
         console.log(`[VoiceService] Ready: ${currentScenario.id}`);
         ws.send(JSON.stringify({ 
           type: 'ready', 
@@ -94,7 +121,8 @@ export async function handleVoiceWebSocket(ws: VoiceWebSocket) {
           initialGreeting: parsedInitial.text,
           translation: parsedInitial.translation,
           hints: parsedInitial.hints,
-          imageUrl: bgUrl
+          imageUrl: bgUrl,
+          audio: audioBase64
         }));
         return;
       }
@@ -129,6 +157,9 @@ export async function handleVoiceWebSocket(ws: VoiceWebSocket) {
         
         conversationContext += `User: ${userText}\n${currentScenario.character}: ${parsedResponse.text}\n`;
 
+        // Generate audio
+        const audioBase64 = await generateTTS(parsedResponse.text, currentScenario.character);
+
         // Generate new background if respect changed significantly
         let newBgUrl = undefined;
         if (Math.abs(currentRespectScore - oldScore) > 10) {
@@ -145,7 +176,8 @@ export async function handleVoiceWebSocket(ws: VoiceWebSocket) {
           hints: parsedResponse.hints,
           character: currentScenario.character,
           respectScore: currentRespectScore,
-          imageUrl: newBgUrl
+          imageUrl: newBgUrl,
+          audio: audioBase64
         }));
       }
 
