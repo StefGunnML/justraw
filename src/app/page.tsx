@@ -49,6 +49,23 @@ export default function Home() {
         setCurrentScenario(data.scenario);
         setRespectScore(data.respectScore);
         setStatus('Connected');
+        
+        // Handle initial greeting if provided
+        if (data.initialGreeting) {
+          setHistory(prev => [...prev, { role: data.scenario.character, text: data.initialGreeting }]);
+          setPierreState('speaking');
+          
+          if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+            window.speechSynthesis.cancel();
+            setTimeout(() => {
+              const utterance = new SpeechSynthesisUtterance(data.initialGreeting);
+              utterance.lang = 'fr-FR';
+              utterance.rate = 0.9;
+              utterance.onend = () => setPierreState('idle');
+              window.speechSynthesis.speak(utterance);
+            }, 100);
+          }
+        }
       }
 
       if (data.type === 'response') {

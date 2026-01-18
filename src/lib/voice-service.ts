@@ -61,11 +61,26 @@ export async function handleVoiceWebSocket(ws: VoiceWebSocket) {
 
         ws.chat = chat;
         
+        console.log(`[VoiceService] Generating initial greeting for: ${currentScenario.id}`);
+        // Ask Gemini to start the conversation
+        const initialGreeting = await chat.sendMessage("Initiate the conversation as your character.");
+        const initialText = initialGreeting.response.text();
+        
+        let parsedInitial;
+        try {
+          const cleanText = initialText.replace(/```json|```/g, '').trim();
+          parsedInitial = JSON.parse(cleanText);
+        } catch (e) {
+          console.error('[VoiceService] Failed to parse initial greeting:', initialText);
+          parsedInitial = { text: currentScenario.id === 'paris-cafe' ? "Bonjour. Qu'est-ce que vous voulez?" : "Vos papiers, s'il vous plaît.", respectDelta: 0 };
+        }
+
         console.log(`[VoiceService] Ready: ${currentScenario.id}`);
         ws.send(JSON.stringify({ 
           type: 'ready', 
           scenario: currentScenario, 
-          respectScore: currentRespectScore 
+          respectScore: currentRespectScore,
+          initialGreeting: parsedInitial.text
         }));
         return;
       }
